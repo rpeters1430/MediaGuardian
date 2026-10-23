@@ -96,7 +96,7 @@ def scan_once(reserved=False):
                                 status = "empty" if st.st_size == 0 else "inventory"
                                 issue = "File is zero bytes" if st.st_size == 0 else None
                                 probe = None
-                                if prior and prior["status"] != "missing" and prior["size"] == st.st_size and prior["mtime_ns"] == st.st_mtime_ns:
+                                if prior and prior["status"] not in ("missing", "inventory") and prior["size"] == st.st_size and prior["mtime_ns"] == st.st_mtime_ns:
                                     status, probe, issue = prior["status"], prior["probe_json"], prior["issue"]
                                 elif st.st_size > 0 and probed < MAX_PROBES:
                                     status, probe, issue = probe_file(entry.path)
@@ -154,5 +154,17 @@ def list_issues(limit=100):
             "SELECT path,size,status,issue FROM files "
             "WHERE status IN ('empty','probe_error','missing') ORDER BY status,path LIMIT ?",
             (min(max(limit, 1), 500),),
+        ).fetchall()
+    return [dict(row) for row in rows]
+
+
+def library_stats():
+    with DB_LOCK, connect() as db:
+        rows = db.execute(
+            """SELECT CASE WHEN instr(path,'/') > 0
+               THEN substr(path,1,instr(path,'/')-1) ELSE 'Other' END AS library,
+               COUNT(*) AS files, COALESCE(SUM(size),0) AS bytes
+               FROM files WHERE status != 'missing'
+               GROUP BY library ORDER BY files DESC"""
         ).fetchall()
     return [dict(row) for row in rows]
