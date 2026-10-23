@@ -1,0 +1,22 @@
+name: CI
+on:
+  pull_request:
+  push:
+    branches: [main]
+permissions:
+  contents: read
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+          cache: pip
+      - run: pip install -r requirements-dev.txt
+      - run: python -m compileall -q app
+      - run: pytest -q
+      - run: ruff check app tests --select E4,E7,E9,F
+      - run: cp .env.example .env && docker compose config -q
+      - run: docker build -t mediaguardian:ci .
