@@ -2,7 +2,9 @@ import os
 import tempfile
 from pathlib import Path
 
-os.environ.setdefault("MG_API_TOKEN", "test-token-longer-than-24-chars")
+os.environ.setdefault("MG_USERNAME", "admin")
+os.environ.setdefault("MG_PASSWORD", "test-password-longer-than-12")
+os.environ.setdefault("MG_SESSION_SECRET", "test-session-secret-longer-than-32-characters")
 
 from fastapi.testclient import TestClient
 from app import core  # noqa: E402
@@ -15,7 +17,10 @@ def test_auth_and_health(monkeypatch):
         with TestClient(app) as client:
             assert client.get("/health/ready").status_code == 200
             assert client.get("/api/status").status_code == 401
-            assert client.get("/api/status", headers={"X-API-Key": os.environ["MG_API_TOKEN"]}).status_code == 200
+            assert client.post("/auth/login", json={"username":"admin","password":os.environ["MG_PASSWORD"]}, headers={"Origin":"http://testserver"}).status_code == 200
+            assert client.get("/api/status").status_code == 200
+            assert client.get("/api/libraries").status_code == 200
+            assert client.post("/api/scan").status_code == 403
 
 
 def test_empty_and_missing_files(monkeypatch):
