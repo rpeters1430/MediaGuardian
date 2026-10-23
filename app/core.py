@@ -71,7 +71,7 @@ def scan_once(reserved=False):
         count = 0
         probed = 0
         pending = [root]
-        with DB_LOCK, connect() as db:
+        with connect() as db:
             while pending and count < MAX_FILES:
                 folder = pending.pop()
                 try:
@@ -112,6 +112,8 @@ def scan_once(reserved=False):
                                 )
                                 count += 1
                                 STATE["scanned"] = count
+                                if count % 100 == 0:
+                                    db.commit()
                                 if count >= MAX_FILES:
                                     break
                                 if FILE_SLEEP:
