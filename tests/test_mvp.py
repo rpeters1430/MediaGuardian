@@ -5,8 +5,8 @@ from pathlib import Path
 os.environ.setdefault("MG_API_TOKEN", "test-token-longer-than-24-chars")
 
 from fastapi.testclient import TestClient
-from app import core
-from app.main import app
+from app import core  # noqa: E402
+from app.main import app  # noqa: E402
 
 
 def test_auth_and_health(monkeypatch):
