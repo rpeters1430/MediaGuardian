@@ -96,7 +96,7 @@ def scan_once(reserved=False):
                                 status = "empty" if st.st_size == 0 else "inventory"
                                 issue = "File is zero bytes" if st.st_size == 0 else None
                                 probe = None
-                                if prior and prior["size"] == st.st_size and prior["mtime_ns"] == st.st_mtime_ns:
+                                if prior and prior["status"] != "missing" and prior["size"] == st.st_size and prior["mtime_ns"] == st.st_mtime_ns:
                                     status, probe, issue = prior["status"], prior["probe_json"], prior["issue"]
                                 elif st.st_size > 0 and probed < MAX_PROBES:
                                     status, probe, issue = probe_file(entry.path)
