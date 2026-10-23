@@ -36,7 +36,8 @@ KINDS = {
 }
 
 DOWNLOAD_KINDS = ("copied_download", "download_not_in_library")
-WALK_KINDS = tuple(kind for kind in KINDS if kind not in DOWNLOAD_KINDS)
+# "unreadable" is found by the walk but shown with the stack checks.
+WALK_KINDS = tuple(kind for kind in KINDS if kind not in DOWNLOAD_KINDS) + ("unreadable",)
 
 
 def download_root_strings():
@@ -175,18 +176,19 @@ def volumes_match():
         return None
 
 
-def save_findings(db, findings, kinds):
-    """Replace stored findings of the given kinds. Returns the ones not seen before."""
-    placeholders = ",".join("?" * len(kinds))
+def save_findings(db, findings, kinds, source=None):
+    """Replace stored findings of the given kinds (from one source). Returns the ones not seen before."""
+    where = f"kind IN ({','.join('?' * len(kinds))}) AND source IS ?"
+    params = (*kinds, source)
     known = {
         (row["kind"], row["path"]): row["found_at"]
-        for row in db.execute(f"SELECT kind,path,found_at FROM findings WHERE kind IN ({placeholders})", kinds)
+        for row in db.execute(f"SELECT kind,path,found_at FROM findings WHERE {where}", params)
     }
     now = int(time.time())
-    db.execute(f"DELETE FROM findings WHERE kind IN ({placeholders})", kinds)
+    db.execute(f"DELETE FROM findings WHERE {where}", params)
     db.executemany(
-        "INSERT OR REPLACE INTO findings(kind,path,size,detail,found_at) VALUES (?,?,?,?,?)",
-        [(k, p, s, d, known.get((k, p), now)) for k, p, s, d in findings],
+        "INSERT OR REPLACE INTO findings(kind,path,size,detail,found_at,source) VALUES (?,?,?,?,?,?)",
+        [(k, p, s, d, known.get((k, p), now), source) for k, p, s, d in findings],
     )
     return [f for f in findings if (f[0], f[1]) not in known]
 

@@ -4,11 +4,12 @@ import threading
 import time
 from datetime import datetime
 
-from . import cleanup, core, events, stack
+from . import cleanup, core, crosscheck, events, stack
 
 SCAN_INTERVAL_MINUTES = max(0, int(os.getenv("MG_SCAN_INTERVAL_MINUTES", "360")))
 SCAN_WINDOW = os.getenv("MG_SCAN_WINDOW", "").strip()
 STARTUP_DELAY = max(0, int(os.getenv("MG_STARTUP_SCAN_DELAY", "120")))
+CROSSCHECK_MINUTES = max(0, int(os.getenv("MG_CROSSCHECK_MINUTES", "60")))
 TICK_SECONDS = 30
 
 
@@ -59,6 +60,12 @@ def report(summary):
             "warning", "file_shrunk",
             f"{path} shrank from {size_text(before)} to {size_text(after)}. Check it still plays in full.",
         )
+    unreadable = [f for f in summary["new_findings"] if f[0] == "unreadable"]
+    if unreadable:
+        events.record(
+            "warning", "unreadable",
+            f"{len(unreadable)} files or folders can't be read (permission denied), e.g. {unreadable[0][1]}",
+        )
     leftovers = [f for f in summary["new_findings"] if f[0] == "shrinkarr_leftover"]
     if leftovers:
         events.record(
@@ -66,11 +73,12 @@ def report(summary):
             f"{len(leftovers)} Shrinkarr leftover files found, e.g. {leftovers[0][1]}. "
             "A replacement may have been interrupted.",
         )
-    if summary["new_findings"]:
-        reclaim = sum(f[2] for f in summary["new_findings"])
+    clutter = [f for f in summary["new_findings"] if f[0] in cleanup.KINDS]
+    if clutter:
+        reclaim = sum(f[2] for f in clutter)
         events.record(
             "info", "cleanup_found",
-            f"{len(summary['new_findings']):,} new cleanup items ({size_text(reclaim)}). See Space & cleanup.",
+            f"{len(clutter):,} new cleanup items ({size_text(reclaim)}). See Cleanup.",
         )
     if summary["errors"]:
         events.record(
@@ -103,10 +111,41 @@ def check_capacity():
             events.record("info", "disk_ok", f"{item['label']} has enough free space again")
 
 
+def report_crosscheck(new):
+    by_kind = {}
+    for finding in new:
+        by_kind.setdefault(finding[0], []).append(finding)
+    for kind, level in (
+        ("arr_missing_file", "warning"), ("server_missing_file", "warning"), ("arr_stuck_import", "warning"),
+        ("arr_not_tracked", "info"), ("server_not_in_library", "info"),
+    ):
+        found = by_kind.get(kind)
+        if found:
+            first = found[0]
+            example = first[1] if kind != "arr_stuck_import" else f"{first[1]} ({first[3]})"
+            events.record(
+                level, kind,
+                f"{crosscheck.KINDS[kind]}: {len(found)} new, e.g. {example}"[:900],
+            )
+    for state in crosscheck.STATE["services"].values():
+        key = f"crosscheck_error:{state['name']}"
+        with core.DB_LOCK, core.connect() as db:
+            previous = cleanup.get_flag(db, key)
+            cleanup.set_flag(db, key, state["error"] or "")
+        if state["error"] and not previous:
+            events.record("warning", "crosscheck_failed", f"Couldn't check {state['name']}: {state['error']}")
+
+
+def run_crosscheck():
+    report_crosscheck(crosscheck.run())
+
+
 def run_scan(trigger="manual", reserved=False):
     summary = core.scan_once(reserved=reserved, trigger=trigger)
     if summary:
         report(summary)
+        if summary["complete"]:
+            run_crosscheck()
     return summary
 
 
@@ -121,13 +160,22 @@ def scan_due(now, started_at):
     return now - last >= SCAN_INTERVAL_MINUTES * 60
 
 
+def crosscheck_due(now):
+    last = crosscheck.STATE["last_run"]
+    return bool(CROSSCHECK_MINUTES) and core.STATE["last_finished"] is not None and (
+        last is None or now - last >= CROSSCHECK_MINUTES * 60
+    )
+
+
 def scheduler(stop):
     started_at = time.time()
     while not stop.wait(TICK_SECONDS):
         try:
             check_capacity()
-        except Exception as exc:  # a failed sample must not stop scheduled scans
-            core.STATE["last_error"] = f"Capacity check failed: {exc}"[:500]
+            if not core.STATE["running"] and crosscheck_due(time.time()):
+                run_crosscheck()
+        except Exception as exc:  # a failed check must not stop scheduled scans
+            core.STATE["last_error"] = f"Background check failed: {exc}"[:500]
         if scan_due(time.time(), started_at) and core.reserve_scan():
             run_scan("scheduled", reserved=True)
 

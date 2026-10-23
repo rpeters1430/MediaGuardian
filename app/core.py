@@ -24,6 +24,10 @@ SHRINK_ALERT_PERCENT = max(0.0, float(os.getenv("MG_SHRINK_ALERT_PERCENT", "90")
 EXCLUDE_DIRS = {
     name.strip().lower() for name in os.getenv("MG_EXCLUDE", "").split(",") if name.strip()
 } | {"lost+found", "$recycle.bin", "system volume information"}
+UNREADABLE_DETAIL = (
+    f"Permission denied for MediaGuardian (user {os.getuid()}:{os.getgid()}). If your media server "
+    "runs as the same user, it can't read this either"
+)
 SCAN_LOCK = threading.Lock()
 DB_LOCK = threading.RLock()
 STATE = {"running": False, "scanned": 0, "last_error": None, "last_finished": None, "started_at": None}
@@ -59,6 +63,8 @@ def init_db():
             at INTEGER NOT NULL, label TEXT NOT NULL, total INTEGER NOT NULL, free INTEGER NOT NULL
         )""")
         db.execute("CREATE INDEX IF NOT EXISTS ix_capacity_at ON capacity(at)")
+        if "source" not in {row["name"] for row in db.execute("PRAGMA table_info(findings)")}:
+            db.execute("ALTER TABLE findings ADD COLUMN source TEXT")
         db.execute("CREATE TABLE IF NOT EXISTS kv (key TEXT PRIMARY KEY, value TEXT)")
         db.execute("""CREATE TABLE IF NOT EXISTS scans (
             id INTEGER PRIMARY KEY AUTOINCREMENT, started_at INTEGER NOT NULL,
@@ -245,6 +251,10 @@ def scan_once(reserved=False, trigger="manual"):
                                 tally.videos += 1
                                 relpath = str(Path(entry.path).relative_to(root))
                                 st = entry.stat(follow_symlinks=False)
+                                if not os.access(entry.path, os.R_OK):
+                                    summary["folder_findings"].append((
+                                        "unreadable", relpath, st.st_size, UNREADABLE_DETAIL,
+                                    ))
                                 if cleanup.is_sample(entry.name, st.st_size):
                                     summary["folder_findings"].append((
                                         "sample_file", relpath, st.st_size, "Sample clip left by a release",
@@ -309,6 +319,10 @@ def scan_once(reserved=False, trigger="manual"):
                 except OSError as exc:
                     _note_error(summary, exc)
                     unreadable.append(str(folder.relative_to(root)))
+                    if isinstance(exc, PermissionError):
+                        summary["folder_findings"].append((
+                            "unreadable", str(folder.relative_to(root)), 0, UNREADABLE_DETAIL,
+                        ))
             if not pending and summary["seen"] < MAX_FILES:
                 summary["complete"] = 1
                 inside = [Path(d) for d in download_dirs if Path(d).is_relative_to(root)]
