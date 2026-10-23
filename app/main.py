@@ -8,7 +8,7 @@ from fastapi import Depends, FastAPI, HTTPException, Request, Response
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
-from . import auth, core, events, guardian, stack
+from . import auth, cleanup, core, events, guardian, stack
 
 
 class LoginBody(BaseModel):
@@ -28,7 +28,7 @@ async def lifespan(app):
 
 
 app = FastAPI(
-    title="MediaGuardian", version="0.3.0", lifespan=lifespan,
+    title="MediaGuardian", version="0.4.0", lifespan=lifespan,
     docs_url=None, redoc_url=None, openapi_url=None,
 )
 
@@ -120,6 +120,23 @@ def acknowledge_events(request: Request, user: str = Depends(auth.check_session)
     auth.same_origin(request)
     events.acknowledge_all()
     return {"acknowledged": True}
+
+
+@app.get("/api/space")
+def space(user: str = Depends(auth.check_session)):
+    return {
+        "capacity": cleanup.capacity(),
+        "downloads": [str(root) for root in cleanup.DOWNLOAD_ROOTS],
+        "volumes_match": cleanup.volumes_match(),
+        "cleanup": cleanup.summary(),
+    }
+
+
+@app.get("/api/findings")
+def findings(kind: str | None = None, limit: int = 200, user: str = Depends(auth.check_session)):
+    if kind is not None and kind not in cleanup.KINDS:
+        raise HTTPException(400, "Unknown finding kind")
+    return cleanup.list_findings(kind, limit)
 
 
 @app.get("/api/stack")

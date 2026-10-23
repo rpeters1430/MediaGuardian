@@ -8,7 +8,8 @@ main{max-width:1120px;margin:auto;padding:22px}h2{font-size:1.08rem;margin:0 0 1
 .grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:16px;margin:18px 0}.card{background:#17253a;border:1px solid #2b4058;border-radius:16px;padding:20px;min-width:0}.metric{font-size:2rem;font-weight:750;word-break:break-word}.muted{color:#a8bad0;font-size:.9rem}
 button,input{font:inherit;border-radius:10px;padding:12px 14px;border:1px solid #435974}button{background:#256b9e;color:white;border-color:#3487c0;cursor:pointer}button:disabled{opacity:.5;cursor:default}button.secondary{background:#1a2b41}input{background:#0e1a29;color:white;width:100%;margin:8px 0 14px}
 .actions{display:flex;gap:10px;align-items:center;flex-wrap:wrap}.hide{display:none!important}.auth{max-width:430px;margin:10vh auto}.alert{color:#ffbdbd;min-height:24px}.good{color:#6fe0b1}.issue{padding:12px 0;border-bottom:1px solid #31425a;overflow-wrap:anywhere}.pill{border-radius:99px;background:#28475a;padding:5px 10px;font-size:.8rem}progress{width:100%;height:15px;accent-color:#40c3a1}
-.dot{display:inline-block;width:10px;height:10px;border-radius:50%;margin-right:8px;background:#7d8ea5}.dot.up{background:#40c3a1}.dot.unstable{background:#f0c05a}.dot.down{background:#ff6b6b}.warn{color:#f0c05a;font-size:.9rem;margin:6px 0 0;overflow-wrap:break-word}.event{padding:10px 0;border-bottom:1px solid #31425a;overflow-wrap:anywhere}.event .lvl{font-weight:700;margin-right:6px}.lvl.critical{color:#ff6b6b}.lvl.warning{color:#f0c05a}.lvl.info{color:#8fb8e0}.scroll{overflow-x:auto}table{border-collapse:collapse;width:100%;font-size:.9rem}th,td{text-align:left;padding:8px 10px;border-bottom:1px solid #31425a;white-space:nowrap}th{color:#a8bad0;font-weight:600}.head{display:flex;justify-content:space-between;align-items:center;gap:10px;margin-bottom:14px}.head h2{margin:0}.svc{min-width:0}.svc strong{overflow-wrap:anywhere}code{background:#0e1a29;padding:2px 6px;border-radius:6px;overflow-wrap:anywhere}
+.dot{display:inline-block;width:10px;height:10px;border-radius:50%;margin-right:8px;background:#7d8ea5}.dot.up{background:#40c3a1}.dot.unstable{background:#f0c05a}.dot.down{background:#ff6b6b}.warn{color:#f0c05a;font-size:.9rem;margin:6px 0 0;overflow-wrap:break-word}.event{padding:10px 0;border-bottom:1px solid #31425a;overflow-wrap:anywhere}.event .lvl{font-weight:700;margin-right:6px}.lvl.critical{color:#ff6b6b}.lvl.warning{color:#f0c05a}.lvl.info{color:#8fb8e0}.scroll{overflow-x:auto}table{border-collapse:collapse;width:100%;font-size:.9rem}th,td{text-align:left;padding:8px 10px;border-bottom:1px solid #31425a;white-space:nowrap}th{color:#a8bad0;font-weight:600}.head{display:flex;justify-content:space-between;align-items:center;gap:10px;margin-bottom:14px}.head h2{margin:0}.svc{min-width:0}.svc strong{overflow-wrap:anywhere}details{border-bottom:1px solid #31425a;padding:10px 0}summary{cursor:pointer;display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap}summary span{color:#a8bad0}.finding{padding:8px 0 8px 14px;border-left:2px solid #31425a;margin:8px 0;overflow-wrap:anywhere}.finding p{margin:4px 0 0;font-size:.88rem}
+code{background:#0e1a29;padding:2px 6px;border-radius:6px;overflow-wrap:anywhere}
 @media(max-width:800px){.grid{grid-template-columns:repeat(2,minmax(0,1fr))}}@media(max-width:520px){.grid{grid-template-columns:1fr 1fr;gap:10px}.metric{font-size:1.45rem}.card{padding:14px}header{padding:16px}main{padding:14px}.auth{margin:5vh auto}.actions button{flex:1}}
 </style></head><body>
 <header><h1>🛡 MediaGuardian</h1><button id="logout" class="secondary hide">Sign out</button></header>
@@ -28,7 +29,9 @@ button,input{font:inherit;border-radius:10px;padding:12px 14px;border:1px solid 
 <section class="card"><div class="muted">Probed files</div><div class="metric" id="probed">—</div></section>
 <section class="card"><div class="muted">Issues</div><div class="metric" id="issueCount">—</div></section>
 </div>
-<section class="card"><h2>Scan activity</h2><div id="scanInfo">Not started</div><progress id="progress" max="100" value="0"></progress></section>
+<section class="card"><h2>Space</h2><div id="capacity" class="grid" style="margin:0"></div><p id="dlNote" class="muted"></p></section>
+<section class="card" style="margin-top:16px"><div class="head"><h2>Cleanup</h2><span class="muted" id="reclaim"></span></div><p class="muted">MediaGuardian only reports these. Delete or fix them yourself, or in Sonarr, Radarr or your download client.</p><div id="cleanup"></div></section>
+<section class="card" style="margin-top:16px"><h2>Scan activity</h2><div id="scanInfo">Not started</div><progress id="progress" max="100" value="0"></progress></section>
 <section class="card" style="margin-top:16px"><h2>Recent scans</h2><div class="scroll"><table><thead><tr><th>Finished</th><th>Trigger</th><th>Files</th><th>New</th><th>Changed</th><th>Missing</th><th>Issues</th><th>Read errors</th></tr></thead><tbody id="scans"></tbody></table></div></section>
 <section class="card" style="margin-top:16px"><h2>Media folders</h2><div id="libraries" class="grid" style="margin:0"></div></section>
 <section class="card" style="margin-top:16px"><h2>Detected issues</h2><div id="issues">No issues loaded.</div></section>
@@ -47,8 +50,8 @@ function el(tag,cls,text){const e=document.createElement(tag);if(cls)e.className
 function renderStack(stack){
  const box=$('stack');box.replaceChildren();
  $('stackInfo').textContent=stack.services.length?'Checked every '+stack.interval_seconds+'s':'';
- if(stack.config_error){box.append(el('p','alert',stack.config_error))}
- if(!stack.services.length&&!stack.config_error){const p=el('p',null,'No apps configured yet. Create ');p.append(el('code',null,stack.config_file),' to watch Jellyfin, Plex, Sonarr, Radarr, Shrinkarr and the rest of your stack.');box.append(p);return}
+ if(stack.config_error){const p=el('p','alert',stack.config_error);p.style.gridColumn='1/-1';box.append(p)}
+ if(!stack.services.length&&!stack.config_error){const p=el('p',null,'No apps configured yet. Create ');p.style.gridColumn='1/-1';p.append(el('code',null,stack.config_file),' to watch Jellyfin, Plex, Sonarr, Radarr, Shrinkarr and the rest of your stack.');box.append(p);return}
  for(const svc of stack.services){
   const card=el('div','card svc');const title=el('div');title.append(el('span','dot '+svc.status),el('strong',null,svc.name));
   const label={up:'Up',unstable:'Not responding',down:'Down'}[svc.status];
@@ -66,10 +69,37 @@ function renderScans(list){
  for(const s of list){const tr=el('tr');const missing=s.missing_held?s.missing_held.toLocaleString()+' held':s.missing_marked.toLocaleString();
   for(const v of [when(s.finished_at),s.trigger,s.seen.toLocaleString()+(s.complete?'':' (partial)'),s.new_files+s.restored,s.changed,missing,s.new_issues,s.errors])tr.append(el('td',null,String(v)));body.append(tr)}
 }
+const bytes=n=>{const u=['B','KiB','MiB','GiB','TiB'];let i=0;while(n>=1024&&i<u.length-1){n/=1024;i++}return (i?n.toFixed(1):n)+' '+u[i]};
+let lastCleanup='';
+function renderSpace(space){
+ const box=$('capacity');box.replaceChildren();
+ if(!space.capacity.length)box.append(el('p','muted','Measuring free space…'));
+ for(const v of space.capacity){
+  const card=el('div','card');const bar=el('progress');bar.max=100;bar.value=v.used_percent;
+  let outlook='Forecast available after a day of history';
+  if(v.days_left!==null)outlook='Full in about '+Math.round(v.days_left).toLocaleString()+' days (+'+bytes(v.growth_per_day)+'/day)';
+  else if(v.growth_per_day!==null)outlook='Not growing';
+  card.append(el('div','muted',v.label),el('div','metric',v.used_percent+'% used'),bar,el('p',null,bytes(v.free)+' free of '+bytes(v.total)),el('p','muted',outlook));box.append(card)}
+ const note=$('dlNote');note.className='muted';
+ if(!space.downloads.length)note.textContent='Set MG_DOWNLOADS to also check for downloads stored twice instead of hardlinked.';
+ else if(space.volumes_match===false){note.className='warn';note.textContent='⚠ Downloads are on a different volume from your media, so hardlinks can\'t work: every import is a full copy.'}
+ else note.textContent='Checking downloads in '+space.downloads.join(', ');
+ const key=JSON.stringify(space.cleanup);if(key===lastCleanup)return;lastCleanup=key;
+ const list=$('cleanup');list.replaceChildren();
+ const items=space.cleanup.filter(c=>c.count);const total=items.reduce((a,c)=>a+c.bytes,0);
+ $('reclaim').textContent=items.length?bytes(total)+' to review':'';
+ if(!items.length){list.append(el('p',null,'Nothing to clean up.'));return}
+ for(const c of items){
+  const d=el('details');const sum=el('summary');sum.append(el('strong',null,c.label),el('span',null,c.count.toLocaleString()+' • '+bytes(c.bytes)));d.append(sum);
+  d.ontoggle=async()=>{if(!d.open||d.dataset.loaded)return;d.dataset.loaded='1';try{const rows=await api('/api/findings?kind='+c.kind);
+   for(const r of rows){const f=el('div','finding');f.append(el('div',null,r.path+(r.size?' — '+bytes(r.size):'')),el('p','muted',r.detail||''));d.append(f)}
+   if(rows.length<c.count)d.append(el('p','muted','Showing the largest '+rows.length+'.'))}catch(e){d.append(el('p','alert',e.message))}};
+  list.append(d)}
+}
 async function refresh(){
  try{
- const [data,issues,libraries,stack,events,scans]=await Promise.all([api('/api/status'),api('/api/issues'),api('/api/libraries'),api('/api/stack'),api('/api/events'),api('/api/scans?limit=10')]);
- renderStack(stack);renderEvents(events);renderScans(scans);
+ const [data,issues,libraries,stack,events,scans,space]=await Promise.all([api('/api/status'),api('/api/issues'),api('/api/libraries'),api('/api/stack'),api('/api/events'),api('/api/scans?limit=10'),api('/api/space')]);
+ renderStack(stack);renderEvents(events);renderScans(scans);renderSpace(space);
  $('files').textContent=data.total_files.toLocaleString();$('bytes').textContent=(data.bytes/1099511627776).toFixed(2)+' TiB';
  $('probed').textContent=(data.statuses.ok||0).toLocaleString();
  $('issueCount').textContent=issues.length.toLocaleString()+(issues.length===500?'+':'');
