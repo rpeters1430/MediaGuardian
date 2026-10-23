@@ -1,0 +1,9 @@
+[
+  {"name": "Jellyfin", "type": "jellyfin", "url": "http://192.168.1.10:8096"},
+  {"name": "Sonarr", "type": "sonarr", "url": "http://192.168.1.10:8989", "api_key": "SONARR_API_KEY"},
+  {"name": "Radarr", "type": "radarr", "url": "http://192.168.1.10:7878", "api_key": "RADARR_API_KEY"},
+  {"name": "Prowlarr", "type": "prowlarr", "url": "http://192.168.1.10:9696", "api_key": "PROWLARR_API_KEY"},
+  {"name": "qBittorrent", "type": "qbittorrent", "url": "http://192.168.1.10:8080"},
+  {"name": "Jellyseerr", "type": "jellyseerr", "url": "http://192.168.1.10:5055"},
+  {"name": "Shrinkarr", "type": "shrinkarr", "url": "http://192.168.1.10:3000"}
+]

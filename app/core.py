@@ -13,9 +13,19 @@ MAX_PROBES = max(0, int(os.getenv("MG_MAX_PROBES_PER_SCAN", "30")))
 PROBE_TIMEOUT = max(2, int(os.getenv("MG_PROBE_TIMEOUT", "12")))
 FILE_SLEEP = max(0, float(os.getenv("MG_FILE_SLEEP", "0.02")))
 MAX_FILES = max(1, int(os.getenv("MG_MAX_FILES", "250000")))
+# Files modified more recently than this are inventoried but not probed, so
+# downloads and Shrinkarr encodes aren't read while they are still being written.
+SETTLE_SECONDS = max(0, int(os.getenv("MG_SETTLE_SECONDS", "300")))
+# If at least MISSING_GUARD_MIN files and MISSING_GUARD_PERCENT of the library
+# vanish in one scan, hold off marking them missing until the next scan agrees.
+MISSING_GUARD_PERCENT = max(0.0, float(os.getenv("MG_MISSING_GUARD_PERCENT", "10")))
+MISSING_GUARD_MIN = max(1, int(os.getenv("MG_MISSING_GUARD_MIN", "25")))
+EXCLUDE_DIRS = {
+    name.strip().lower() for name in os.getenv("MG_EXCLUDE", "").split(",") if name.strip()
+} | {"lost+found", "$recycle.bin", "system volume information"}
 SCAN_LOCK = threading.Lock()
 DB_LOCK = threading.RLock()
-STATE = {"running": False, "scanned": 0, "last_error": None, "last_finished": None}
+STATE = {"running": False, "scanned": 0, "last_error": None, "last_finished": None, "started_at": None}
 
 
 def connect():
@@ -35,14 +45,46 @@ def init_db():
             status TEXT NOT NULL, probe_json TEXT, issue TEXT
         )""")
         db.execute("CREATE INDEX IF NOT EXISTS ix_files_status ON files(status)")
+        db.execute("""CREATE TABLE IF NOT EXISTS scans (
+            id INTEGER PRIMARY KEY AUTOINCREMENT, started_at INTEGER NOT NULL,
+            finished_at INTEGER NOT NULL, trigger TEXT NOT NULL, complete INTEGER NOT NULL,
+            seen INTEGER NOT NULL, probed INTEGER NOT NULL, new_files INTEGER NOT NULL,
+            changed INTEGER NOT NULL, restored INTEGER NOT NULL, missing_marked INTEGER NOT NULL,
+            missing_held INTEGER NOT NULL, new_issues INTEGER NOT NULL, errors INTEGER NOT NULL,
+            error_sample TEXT
+        )""")
+        db.execute("""CREATE TABLE IF NOT EXISTS events (
+            id INTEGER PRIMARY KEY AUTOINCREMENT, at INTEGER NOT NULL, level TEXT NOT NULL,
+            kind TEXT NOT NULL, message TEXT NOT NULL, acknowledged INTEGER NOT NULL
+        )""")
+        db.execute("CREATE INDEX IF NOT EXISTS ix_events_ack ON events(acknowledged)")
+    STATE["last_finished"] = last_scan_finished()
 
 
 def reserve_scan():
     with SCAN_LOCK:
         if STATE["running"]:
             return False
-        STATE.update(running=True, scanned=0, last_error=None)
+        STATE.update(running=True, scanned=0, last_error=None, started_at=int(time.time()))
         return True
+
+
+def skip_dir(name):
+    # Covers NAS/OS housekeeping folders such as @eaDir, #recycle, .Trash-1000 and .@__thumb.
+    return name.startswith((".", "@", "#")) or name.lower() in EXCLUDE_DIRS
+
+
+def skip_file(name):
+    return (
+        name.startswith("._")
+        or ".shrinkarr.tmp" in name
+        or Path(name).suffix.lower() not in EXTENSIONS
+    )
+
+
+def excluded(relpath):
+    parts = Path(relpath).parts
+    return skip_file(parts[-1]) or any(skip_dir(part) for part in parts[:-1])
 
 
 def probe_file(path):
@@ -60,47 +102,131 @@ def probe_file(path):
         return "probe_error", None, str(exc)[:500]
 
 
-def scan_once(reserved=False):
+def _note_error(summary, exc):
+    summary["errors"] += 1
+    if not summary["error_sample"]:
+        summary["error_sample"] = str(exc)[:500]
+    STATE["last_error"] = summary["error_sample"]
+
+
+def _resolve_vanished(db, scan_id, present_before, unreadable, summary):
+    """Decide what happens to indexed files the walk didn't see this time."""
+    rows = db.execute(
+        "SELECT path FROM files WHERE checked_at < ? AND status != 'missing'", (scan_id,)
+    ).fetchall()
+    vanished, keep, drop = [], [], []
+    for row in rows:
+        path = row["path"]
+        if excluded(path):
+            drop.append((path,))
+        elif any(path.startswith(prefix + "/") for prefix in unreadable):
+            keep.append((path,))
+        else:
+            vanished.append(path)
+    db.executemany("DELETE FROM files WHERE path=?", drop)
+    db.executemany("UPDATE files SET checked_at=? WHERE path=?", [(scan_id, p) for (p,) in keep])
+    if not vanished:
+        return
+    share = len(vanished) * 100 / max(present_before, 1)
+    suspicious = summary["seen"] == 0 or (
+        len(vanished) >= MISSING_GUARD_MIN and share >= MISSING_GUARD_PERCENT
+    )
+    previous = db.execute(
+        "SELECT missing_held FROM scans WHERE complete=1 ORDER BY id DESC LIMIT 1"
+    ).fetchone()
+    if suspicious and not (previous and previous["missing_held"]):
+        summary["missing_held"] = len(vanished)
+        summary["missing_share"] = round(share, 1)
+        return
+    db.executemany(
+        "UPDATE files SET status='missing',issue='Not observed in latest complete scan' WHERE path=?",
+        [(p,) for p in vanished],
+    )
+    summary["missing_marked"] = len(vanished)
+    summary["missing_sample"] = sorted(vanished)[:5]
+
+
+def _save_scan(db, summary):
+    db.execute(
+        """INSERT INTO scans(started_at,finished_at,trigger,complete,seen,probed,new_files,changed,
+        restored,missing_marked,missing_held,new_issues,errors,error_sample)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+        tuple(summary[key] for key in (
+            "started_at", "finished_at", "trigger", "complete", "seen", "probed", "new_files",
+            "changed", "restored", "missing_marked", "missing_held", "new_issues", "errors",
+            "error_sample",
+        )),
+    )
+
+
+def scan_once(reserved=False, trigger="manual"):
+    """Walk the media root once. Returns a summary dict, or False if a scan is already running."""
     if not reserved and not reserve_scan():
         return False
+    summary = {
+        "started_at": STATE["started_at"] or int(time.time()), "finished_at": 0,
+        "trigger": trigger, "complete": 0, "seen": 0, "probed": 0, "new_files": 0,
+        "changed": 0, "restored": 0, "missing_marked": 0, "missing_held": 0,
+        "missing_share": 0, "missing_sample": [], "new_issues": 0, "issue_sample": [],
+        "errors": 0, "error_sample": None, "fatal": None,
+    }
     try:
         root = MEDIA.resolve(strict=True)
         if not root.is_dir():
             raise ValueError("Media root is not a directory")
         scan_id = time.time_ns()
-        count = 0
-        probed = 0
+        settled_before = time.time() - SETTLE_SECONDS
+        unreadable = []
         pending = [root]
         with connect() as db:
-            while pending and count < MAX_FILES:
+            present_before = db.execute(
+                "SELECT COUNT(*) FROM files WHERE status != 'missing'"
+            ).fetchone()[0]
+            os.scandir(root).close()  # an unreadable root must fail the scan, not empty it
+            while pending and summary["seen"] < MAX_FILES:
                 folder = pending.pop()
                 try:
                     with os.scandir(folder) as entries:
                         for entry in entries:
+                            relpath = None
                             try:
                                 if entry.is_symlink():
                                     continue
                                 if entry.is_dir(follow_symlinks=False):
-                                    pending.append(Path(entry.path))
+                                    if not skip_dir(entry.name):
+                                        pending.append(Path(entry.path))
                                     continue
-                                if not entry.is_file(follow_symlinks=False):
+                                if not entry.is_file(follow_symlinks=False) or skip_file(entry.name):
                                     continue
-                                if Path(entry.name).suffix.lower() not in EXTENSIONS:
-                                    continue
-                                st = entry.stat(follow_symlinks=False)
                                 relpath = str(Path(entry.path).relative_to(root))
+                                st = entry.stat(follow_symlinks=False)
                                 prior = db.execute(
                                     "SELECT size,mtime_ns,status,probe_json,issue FROM files WHERE path=?",
                                     (relpath,),
                                 ).fetchone()
+                                unchanged = prior and prior["size"] == st.st_size and prior["mtime_ns"] == st.st_mtime_ns
+                                if prior is None:
+                                    summary["new_files"] += 1
+                                elif prior["status"] == "missing":
+                                    summary["restored"] += 1
+                                elif not unchanged:
+                                    summary["changed"] += 1
                                 status = "empty" if st.st_size == 0 else "inventory"
                                 issue = "File is zero bytes" if st.st_size == 0 else None
                                 probe = None
-                                if prior and prior["status"] not in ("missing", "inventory") and prior["size"] == st.st_size and prior["mtime_ns"] == st.st_mtime_ns:
+                                if unchanged and prior["status"] not in ("missing", "inventory"):
                                     status, probe, issue = prior["status"], prior["probe_json"], prior["issue"]
-                                elif st.st_size > 0 and probed < MAX_PROBES:
+                                elif (
+                                    st.st_size > 0
+                                    and summary["probed"] < MAX_PROBES
+                                    and st.st_mtime <= settled_before
+                                ):
                                     status, probe, issue = probe_file(entry.path)
-                                    probed += 1
+                                    summary["probed"] += 1
+                                if status in ("empty", "probe_error") and not (unchanged and prior["status"] == status):
+                                    summary["new_issues"] += 1
+                                    if len(summary["issue_sample"]) < 5:
+                                        summary["issue_sample"].append(relpath)
                                 db.execute(
                                     """INSERT INTO files(path,size,mtime_ns,checked_at,status,probe_json,issue)
                                     VALUES (?,?,?,?,?,?,?)
@@ -110,31 +236,49 @@ def scan_once(reserved=False):
                                     probe_json=excluded.probe_json,issue=excluded.issue""",
                                     (relpath, st.st_size, st.st_mtime_ns, scan_id, status, probe, issue),
                                 )
-                                count += 1
-                                STATE["scanned"] = count
-                                if count % 100 == 0:
+                                summary["seen"] += 1
+                                STATE["scanned"] = summary["seen"]
+                                if summary["seen"] % 100 == 0:
                                     db.commit()
-                                if count >= MAX_FILES:
+                                if summary["seen"] >= MAX_FILES:
                                     break
                                 if FILE_SLEEP:
                                     time.sleep(FILE_SLEEP)
                             except (OSError, ValueError) as exc:
-                                STATE["last_error"] = str(exc)[:500]
+                                _note_error(summary, exc)
+                                if relpath:
+                                    # Keep a file we failed to read from being reported missing.
+                                    db.execute("UPDATE files SET checked_at=? WHERE path=?", (scan_id, relpath))
                 except OSError as exc:
-                    STATE["last_error"] = str(exc)[:500]
-            if not pending and count < MAX_FILES and not STATE["last_error"]:
-                db.execute(
-                    "UPDATE files SET status='missing',issue='Not observed in latest complete scan' "
-                    "WHERE checked_at < ? AND status != 'missing'",
-                    (scan_id,),
-                )
+                    _note_error(summary, exc)
+                    unreadable.append(str(folder.relative_to(root)))
+            if not pending and summary["seen"] < MAX_FILES:
+                summary["complete"] = 1
+                _resolve_vanished(db, scan_id, present_before, unreadable, summary)
+            summary["finished_at"] = int(time.time())
+            _save_scan(db, summary)
     except Exception as exc:
-        STATE["last_error"] = str(exc)[:500]
+        summary["fatal"] = str(exc)[:500]
+        STATE["last_error"] = summary["fatal"]
     finally:
         with SCAN_LOCK:
             STATE["running"] = False
             STATE["last_finished"] = int(time.time())
-    return True
+    return summary
+
+
+def last_scan_finished():
+    with DB_LOCK, connect() as db:
+        row = db.execute("SELECT MAX(finished_at) FROM scans").fetchone()
+    return row[0]
+
+
+def list_scans(limit=20):
+    with DB_LOCK, connect() as db:
+        rows = db.execute(
+            "SELECT * FROM scans ORDER BY id DESC LIMIT ?", (min(max(limit, 1), 200),)
+        ).fetchall()
+    return [dict(row) for row in rows]
 
 
 def stats():

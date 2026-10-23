@@ -8,6 +8,7 @@ main{max-width:1120px;margin:auto;padding:22px}h2{font-size:1.08rem;margin:0 0 1
 .grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:16px;margin:18px 0}.card{background:#17253a;border:1px solid #2b4058;border-radius:16px;padding:20px;min-width:0}.metric{font-size:2rem;font-weight:750;word-break:break-word}.muted{color:#a8bad0;font-size:.9rem}
 button,input{font:inherit;border-radius:10px;padding:12px 14px;border:1px solid #435974}button{background:#256b9e;color:white;border-color:#3487c0;cursor:pointer}button:disabled{opacity:.5;cursor:default}button.secondary{background:#1a2b41}input{background:#0e1a29;color:white;width:100%;margin:8px 0 14px}
 .actions{display:flex;gap:10px;align-items:center;flex-wrap:wrap}.hide{display:none!important}.auth{max-width:430px;margin:10vh auto}.alert{color:#ffbdbd;min-height:24px}.good{color:#6fe0b1}.issue{padding:12px 0;border-bottom:1px solid #31425a;overflow-wrap:anywhere}.pill{border-radius:99px;background:#28475a;padding:5px 10px;font-size:.8rem}progress{width:100%;height:15px;accent-color:#40c3a1}
+.dot{display:inline-block;width:10px;height:10px;border-radius:50%;margin-right:8px;background:#7d8ea5}.dot.up{background:#40c3a1}.dot.unstable{background:#f0c05a}.dot.down{background:#ff6b6b}.warn{color:#f0c05a;font-size:.9rem;margin:6px 0 0;overflow-wrap:break-word}.event{padding:10px 0;border-bottom:1px solid #31425a;overflow-wrap:anywhere}.event .lvl{font-weight:700;margin-right:6px}.lvl.critical{color:#ff6b6b}.lvl.warning{color:#f0c05a}.lvl.info{color:#8fb8e0}.scroll{overflow-x:auto}table{border-collapse:collapse;width:100%;font-size:.9rem}th,td{text-align:left;padding:8px 10px;border-bottom:1px solid #31425a;white-space:nowrap}th{color:#a8bad0;font-weight:600}.head{display:flex;justify-content:space-between;align-items:center;gap:10px;margin-bottom:14px}.head h2{margin:0}.svc{min-width:0}.svc strong{overflow-wrap:anywhere}code{background:#0e1a29;padding:2px 6px;border-radius:6px;overflow-wrap:anywhere}
 @media(max-width:800px){.grid{grid-template-columns:repeat(2,minmax(0,1fr))}}@media(max-width:520px){.grid{grid-template-columns:1fr 1fr;gap:10px}.metric{font-size:1.45rem}.card{padding:14px}header{padding:16px}main{padding:14px}.auth{margin:5vh auto}.actions button{flex:1}}
 </style></head><body>
 <header><h1>🛡 MediaGuardian</h1><button id="logout" class="secondary hide">Sign out</button></header>
@@ -19,6 +20,8 @@ button,input{font:inherit;border-radius:10px;padding:12px 14px;border:1px solid 
 <div id="app" class="hide">
 <div class="actions"><span class="pill" id="state">Idle</span><button id="scan">Start scan</button><button id="refresh" class="secondary">Refresh</button></div>
 <p id="message" role="status"></p>
+<section class="card"><div class="head"><h2>Media stack</h2><span class="muted" id="stackInfo"></span></div><div id="stack" class="grid" style="margin:0"></div></section>
+<section class="card" style="margin-top:16px"><div class="head"><h2>Alerts</h2><button id="ack" class="secondary">Dismiss all</button></div><div id="events">No alerts.</div></section>
 <div class="grid">
 <section class="card"><div class="muted">Media files</div><div class="metric" id="files">—</div></section>
 <section class="card"><div class="muted">Library size</div><div class="metric" id="bytes">—</div></section>
@@ -26,6 +29,7 @@ button,input{font:inherit;border-radius:10px;padding:12px 14px;border:1px solid 
 <section class="card"><div class="muted">Issues</div><div class="metric" id="issueCount">—</div></section>
 </div>
 <section class="card"><h2>Scan activity</h2><div id="scanInfo">Not started</div><progress id="progress" max="100" value="0"></progress></section>
+<section class="card" style="margin-top:16px"><h2>Recent scans</h2><div class="scroll"><table><thead><tr><th>Finished</th><th>Trigger</th><th>Files</th><th>New</th><th>Changed</th><th>Missing</th><th>Issues</th><th>Read errors</th></tr></thead><tbody id="scans"></tbody></table></div></section>
 <section class="card" style="margin-top:16px"><h2>Media folders</h2><div id="libraries" class="grid" style="margin:0"></div></section>
 <section class="card" style="margin-top:16px"><h2>Detected issues</h2><div id="issues">No issues loaded.</div></section>
 </div></main>
@@ -38,13 +42,39 @@ async function api(path,options={}){
 }
 function showLogin(){ $('login').classList.remove('hide');$('app').classList.add('hide');$('logout').classList.add('hide');if(timer)clearInterval(timer);timer=null }
 function showApp(){ $('login').classList.add('hide');$('app').classList.remove('hide');$('logout').classList.remove('hide');if(!timer)timer=setInterval(refresh,5000);refresh() }
+const when=t=>t?new Date(t*1000).toLocaleString([], {month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'}):'—';
+function el(tag,cls,text){const e=document.createElement(tag);if(cls)e.className=cls;if(text!==undefined)e.textContent=text;return e}
+function renderStack(stack){
+ const box=$('stack');box.replaceChildren();
+ $('stackInfo').textContent=stack.services.length?'Checked every '+stack.interval_seconds+'s':'';
+ if(stack.config_error){box.append(el('p','alert',stack.config_error))}
+ if(!stack.services.length&&!stack.config_error){const p=el('p',null,'No apps configured yet. Create ');p.append(el('code',null,stack.config_file),' to watch Jellyfin, Plex, Sonarr, Radarr, Shrinkarr and the rest of your stack.');box.append(p);return}
+ for(const svc of stack.services){
+  const card=el('div','card svc');const title=el('div');title.append(el('span','dot '+svc.status),el('strong',null,svc.name));
+  const label={up:'Up',unstable:'Not responding',down:'Down'}[svc.status];
+  const detail=el('p','muted',label+(svc.status==='up'?' • '+svc.ms+' ms':' • '+(svc.error||''))+' • since '+when(svc.since));
+  card.append(title,detail);for(const w of svc.warnings)card.append(el('p','warn','⚠ '+w));box.append(card)}
+}
+function renderEvents(list){
+ const box=$('events');box.replaceChildren();$('ack').disabled=!list.length;
+ if(!list.length){box.textContent='No alerts.';return}
+ for(const ev of list){const d=el('div','event');d.append(el('span','lvl '+ev.level,ev.level),el('span','muted',when(ev.at)+' — '),document.createTextNode(ev.message));box.append(d)}
+}
+function renderScans(list){
+ const body=$('scans');body.replaceChildren();
+ if(!list.length){const tr=el('tr');const td=el('td',null,'No scans yet.');td.colSpan=8;tr.append(td);body.append(tr);return}
+ for(const s of list){const tr=el('tr');const missing=s.missing_held?s.missing_held.toLocaleString()+' held':s.missing_marked.toLocaleString();
+  for(const v of [when(s.finished_at),s.trigger,s.seen.toLocaleString()+(s.complete?'':' (partial)'),s.new_files+s.restored,s.changed,missing,s.new_issues,s.errors])tr.append(el('td',null,String(v)));body.append(tr)}
+}
 async function refresh(){
  try{
- const [data,issues,libraries]=await Promise.all([api('/api/status'),api('/api/issues'),api('/api/libraries')]);
+ const [data,issues,libraries,stack,events,scans]=await Promise.all([api('/api/status'),api('/api/issues'),api('/api/libraries'),api('/api/stack'),api('/api/events'),api('/api/scans?limit=10')]);
+ renderStack(stack);renderEvents(events);renderScans(scans);
  $('files').textContent=data.total_files.toLocaleString();$('bytes').textContent=(data.bytes/1099511627776).toFixed(2)+' TiB';
  $('probed').textContent=(data.statuses.ok||0).toLocaleString();
  $('issueCount').textContent=issues.length.toLocaleString()+(issues.length===500?'+':'');
- $('state').textContent=data.scan.running?'Scanning':'Idle';
+ const sched=data.schedule;$('state').textContent=data.scan.running?'Scanning':(sched.interval_minutes?(sched.next_scan_after?'Next scan after '+when(sched.next_scan_after):'First scan soon')+(sched.window?' (window '+sched.window+'h)':''):'Automatic scans off');
+ if(data.notifications.last_error)$('message').textContent='Notification failed: '+data.notifications.last_error;
  $('scan').disabled=Boolean(data.scan.running);
  $('scanInfo').textContent=(data.scan.running?'Scanning: ':'Last scan visited: ')+data.scan.scanned.toLocaleString()+' files'+(data.scan.last_error?' • '+data.scan.last_error:'');
  $('progress').value=data.total_files?Math.min(100,(data.scan.scanned/data.total_files)*100):0;
@@ -58,6 +88,7 @@ async function refresh(){
 $('loginForm').onsubmit=async e=>{e.preventDefault();$('loginError').textContent='';try{await api('/auth/login',{method:'POST',body:JSON.stringify({username:$('username').value,password:$('password').value})});$('password').value='';showApp()}catch(err){$('loginError').textContent=err.message}};
 $('scan').onclick=async()=>{try{await api('/api/scan',{method:'POST'});$('message').textContent='Scan started';refresh()}catch(e){$('message').textContent=e.status===409?'Scan already in progress.':e.message}};
 $('refresh').onclick=refresh;
+$('ack').onclick=async()=>{try{await api('/api/events/ack',{method:'POST'});refresh()}catch(e){$('message').textContent=e.message}};
 $('logout').onclick=async()=>{try{await api('/auth/logout',{method:'POST'})}finally{showLogin()}};
 api('/auth/me').then(showApp).catch(showLogin);
 </script></body></html>
