@@ -4,7 +4,7 @@ import threading
 import time
 from datetime import datetime
 
-from . import cleanup, core, crosscheck, events, stack
+from . import cleanup, core, crosscheck, events, playback, stack
 
 SCAN_INTERVAL_MINUTES = max(0, int(os.getenv("MG_SCAN_INTERVAL_MINUTES", "360")))
 SCAN_WINDOW = os.getenv("MG_SCAN_WINDOW", "").strip()
@@ -35,6 +35,7 @@ def in_window(hour, window=WINDOW):
 
 
 def report(summary):
+    summary["new_findings"] = cleanup.drop_muted(summary["new_findings"])
     if summary["fatal"]:
         events.record("critical", "scan_failed", f"Scan failed: {summary['fatal']}")
         return
@@ -80,6 +81,12 @@ def report(summary):
             "info", "cleanup_found",
             f"{len(clutter):,} new cleanup items ({size_text(reclaim)}). See Cleanup.",
         )
+    playback_new = [f for f in summary["new_findings"] if f[0] in playback.KINDS and f[0] != "reencode_candidate"]
+    if playback_new:
+        events.record(
+            "info", "playback_found",
+            f"{len(playback_new):,} new playback issues, e.g. {playback_new[0][1]}: {playback_new[0][3]}"[:900],
+        )
     if summary["errors"]:
         events.record(
             "info", "read_errors",
@@ -112,6 +119,7 @@ def check_capacity():
 
 
 def report_crosscheck(new):
+    new = cleanup.drop_muted(new)
     by_kind = {}
     for finding in new:
         by_kind.setdefault(finding[0], []).append(finding)

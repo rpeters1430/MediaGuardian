@@ -5,7 +5,7 @@ import shutil
 import time
 from pathlib import Path
 
-from . import core
+from . import core, playback
 
 DOWNLOAD_ROOTS = [Path(p.strip()) for p in os.getenv("MG_DOWNLOADS", "").split(",") if p.strip()]
 UNIMPORTED_DAYS = max(0, float(os.getenv("MG_UNIMPORTED_DAYS", "7")))
@@ -37,7 +37,7 @@ KINDS = {
 
 DOWNLOAD_KINDS = ("copied_download", "download_not_in_library")
 # "unreadable" is found by the walk but shown with the stack checks.
-WALK_KINDS = tuple(kind for kind in KINDS if kind not in DOWNLOAD_KINDS) + ("unreadable",)
+WALK_KINDS = tuple(kind for kind in KINDS if kind not in DOWNLOAD_KINDS) + ("unreadable", *playback.KINDS)
 
 
 def download_root_strings():
@@ -69,6 +69,8 @@ class FolderTally:
         self.videos = 0
         self.sidecars = 0
         self.audio = 0
+        self.sidecar_names = []
+        self.probed = []
 
     def finding(self, relfolder):
         if self.entries == 0:
@@ -193,28 +195,69 @@ def save_findings(db, findings, kinds, source=None):
     return [f for f in findings if (f[0], f[1]) not in known]
 
 
-def summary():
+# A mute on a folder also covers everything inside it.
+NOT_MUTED = """NOT EXISTS (SELECT 1 FROM muted m WHERE m.kind=findings.kind
+    AND (findings.path=m.path OR substr(findings.path,1,length(m.path)+1)=m.path||'/'))"""
+
+
+def group_summary(kinds):
+    """Count and size per kind, leaving out muted findings."""
     with core.DB_LOCK, core.connect() as db:
         rows = db.execute(
-            "SELECT kind,COUNT(*) AS count,COALESCE(SUM(size),0) AS bytes FROM findings GROUP BY kind"
+            f"SELECT kind,COUNT(*) AS count,COALESCE(SUM(size),0) AS bytes FROM findings "
+            f"WHERE kind IN ({','.join('?' * len(kinds))}) AND {NOT_MUTED} GROUP BY kind",
+            tuple(kinds),
         ).fetchall()
     counts = {row["kind"]: dict(row) for row in rows}
     return [
         {"kind": kind, "label": label, **counts.get(kind, {"count": 0, "bytes": 0})}
-        for kind, label in KINDS.items()
+        for kind, label in kinds.items()
     ]
 
 
+def summary():
+    return group_summary(KINDS)
+
+
 def list_findings(kind=None, limit=200):
-    query = "SELECT kind,path,size,detail,found_at FROM findings"
+    query = f"SELECT kind,path,size,detail,found_at FROM findings WHERE {NOT_MUTED}"
     params = []
     if kind:
-        query += " WHERE kind=?"
+        query += " AND kind=?"
         params.append(kind)
     query += " ORDER BY size DESC, path LIMIT ?"
     params.append(min(max(limit, 1), 1000))
     with core.DB_LOCK, core.connect() as db:
         return [dict(row) for row in db.execute(query, params)]
+
+
+def mute(kind, path):
+    with core.DB_LOCK, core.connect() as db:
+        db.execute(
+            "INSERT OR REPLACE INTO muted(kind,path,muted_at) VALUES (?,?,?)",
+            (kind, path.strip("/"), int(time.time())),
+        )
+
+
+def unmute(kind, path):
+    with core.DB_LOCK, core.connect() as db:
+        db.execute("DELETE FROM muted WHERE kind=? AND path=?", (kind, path))
+
+
+def list_muted():
+    with core.DB_LOCK, core.connect() as db:
+        return [dict(row) for row in db.execute("SELECT kind,path,muted_at FROM muted ORDER BY muted_at DESC")]
+
+
+def drop_muted(findings):
+    """Filter muted findings out of a list of (kind, path, size, detail) tuples."""
+    muted = {}
+    for row in list_muted():
+        muted.setdefault(row["kind"], []).append(row["path"])
+    return [
+        f for f in findings
+        if not any(f[1] == m or f[1].startswith(m + "/") for m in muted.get(f[0], []))
+    ]
 
 
 def volumes():
