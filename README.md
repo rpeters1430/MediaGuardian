@@ -12,25 +12,8 @@ Lightweight, read-only media library inventory and health dashboard for UGREEN N
 - Do not expose port 8186 directly to the Internet.
 
 ## UGREEN deployment
-```bash
-mkdir -p /volume1/docker/mediaguardian
-sudo chown 1000:10 /volume1/docker/mediaguardian
-cp .env.example .env
-python3 -c 'import secrets;print(secrets.token_urlsafe(36))'
-# Put the generated value in .env as MG_API_TOKEN
-docker compose up -d --build
-docker compose ps
-```
 
-Dashboard: http://127.0.0.1:8186 on the NAS. For a workstation connection use an SSH tunnel:
-
-```bash
-ssh -L 8186:127.0.0.1:8186 USER@NAS-IP
-```
-
-Then open http://127.0.0.1:8186 and enter the API token.
-
-The initial scan is manually triggered, not scheduled. Initial disk enumeration on very large media trees can take time. Confirm resource usage before increasing scan budgets.
+See **v0.2 upgrade** below for username/password credentials and Tailscale binding. The `compose.yaml` pulls the published GHCR image.
 
 ## Development
 ```bash
@@ -49,3 +32,50 @@ Pull requests run tests and build checks. A tag `v0.1.0` triggers GHCR publishin
 2. Jellyfin, Plex and Emby read-only API integration
 3. Sonarr/Radarr import diagnostics
 4. Approval-based repair suggestions, with full audit trail
+
+
+## v0.2 upgrade: username/password login
+
+v0.2 replaces `MG_API_TOKEN` completely. **Before updating the image**, add these values to your existing `.env` in `/volume1/docker/mediaguardian/app`:
+
+```ini
+MG_USERNAME=admin
+MG_PASSWORD=YOUR_UNIQUE_PASSWORD_AT_LEAST_12_CHARACTERS
+MG_SESSION_SECRET=YOUR_SEPARATE_RANDOM_SECRET_AT_LEAST_32_CHARACTERS
+MG_BIND_IP=100.104.229.117
+```
+
+To generate strong values on your NAS:
+
+```bash
+openssl rand -hex 24  # copy output for MG_PASSWORD
+openssl rand -hex 32  # copy DIFFERENT output for MG_SESSION_SECRET
+```
+
+**Important:** protect `.env` (`chmod 600 .env`), never commit it, and don't share credentials. For the existing NAS installation, preserve the SQLite database in `/volume1/docker/mediaguardian`.
+
+For SSH deployments after the new release is published:
+
+```bash
+cd /volume1/docker/mediaguardian/app
+# Update the Compose source (download main archive or sync git), then:
+sudo docker compose pull
+sudo docker compose up -d --no-build
+sudo docker compose ps
+```
+
+Open http://100.104.229.117:8186 on a connected Tailscale device. Login sessions use signed HttpOnly SameSite=Strict cookies (12-hour expiry). Logout clears the local session cookie. The session signature secret should be unique and not reused elsewhere. The password is provided by an environment variable in this first implementation, not stored in plaintext in the SQLite database.
+
+**Network warning:** HTTP over Tailscale is encrypted between Tailscale devices, but browsers still report HTTP and cookies don't have the Secure attribute in this mode. Do not expose the service to the public Internet. For HTTPS behind a trusted proxy, a correctly configured forwarded scheme is needed for Secure cookies.
+
+### New features
+- Responsive dashboard with mobile cards, per-top-level-folder inventory, scan indicator and 5-second polling.
+- Username/password authentication, in-memory login attempt throttling, signed sessions, and same-origin checks for mutating actions.
+- Repeated scans gradually probe previously inventoried media files (up to `MG_MAX_PROBES_PER_SCAN` per run); existing completed FFprobe results are retained for unchanged files.
+- SQLite scan writes committed every 100 files so dashboard inventory updates become visible while scans run.
+
+### Known limitations
+- No multi-user administration or password reset UI yet; change credentials in `.env` and restart.
+- Changing the session secret or username invalidates current login cookies. Old sessions are not individually revocable until expiry.
+- Live scan progress is based on the previous inventory total and may be approximate.
+- This remains metadata-level scanning, not full-video decoding or automatic repair.

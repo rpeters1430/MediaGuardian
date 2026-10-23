@@ -1,13 +1,12 @@
 services:
   mediaguardian:
-    build: .
     image: ghcr.io/rpeters1430/mediaguardian:latest
     container_name: mediaguardian
     restart: unless-stopped
     user: "1000:10"
     init: true
     ports:
-      - "127.0.0.1:8186:8080"
+      - "${MG_BIND_IP:-127.0.0.1}:8186:8080"
     env_file: .env
     environment:
       MG_DATA_DIR: /data
