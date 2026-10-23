@@ -23,9 +23,16 @@ services:
       MG_SETTLE_SECONDS: "300"
       MG_EXCLUDE: ""
       MG_SERVICE_INTERVAL: "60"
+      # Download folder(s) as seen inside the container, comma-separated. Enables the
+      # "stored twice" and "not in library" reports. Mount them read-only below.
+      MG_DOWNLOADS: ""
+      MG_UNIMPORTED_DAYS: "7"
+      MG_DISK_WARN_DAYS: "30"
+      MG_DISK_WARN_PERCENT: "10"
     volumes:
       - /volume1/docker/mediaguardian:/data:rw
       - /volume1/Media:/media:ro
+      # - /volume1/Downloads:/downloads:ro   # then set MG_DOWNLOADS: "/downloads"
     read_only: true
     tmpfs:
       - /tmp:rw,noexec,nosuid,size=32m

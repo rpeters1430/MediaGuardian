@@ -28,11 +28,50 @@ docker build -t mediaguardian:local .
 Pull requests run tests and build checks. A tag `v0.1.0` triggers GHCR publishing for `linux/amd64`. **No container image is published before a tag or manual publication workflow succeeds.**
 
 ## Roadmap
-- **v0.3 (this release):** scheduled scans, scan history, mass-disappearance guard, alerts with ntfy/Discord notifications, media stack status
-- **v0.4:** hardlink and orphan reports, Shrinkarr leftover audit, disk capacity forecast
+- **v0.3:** scheduled scans, scan history, mass-disappearance guard, alerts with ntfy/Discord notifications, media stack status
+- **v0.4 (this release):** hardlink and orphan reports, Shrinkarr leftover audit, disk capacity forecast
 - **v0.5:** Jellyfin/Plex and Sonarr/Radarr cross-checks (library vs disk), permission checks
 - **v0.6:** playability flags (audio/subtitle languages, codecs), suggestions for Shrinkarr, muting issues
 - **Later:** approval-based repair suggestions with a full audit trail. Repairs run in Shrinkarr or the *arr apps; MediaGuardian stays read-only.
+
+
+## v0.4 upgrade: space and cleanup
+
+Pull the new image and update `compose.yaml`. The database is upgraded in place; the first scan after upgrading fills in the new data.
+
+### Space
+The **Space** panel shows how full the media volume is, sampled hourly, and how fast it is growing over the last 30 days. Once there is a day of history it estimates when the volume will be full. You get one alert when free space drops below `MG_DISK_WARN_PERCENT` (default 10%) or the estimate falls under `MG_DISK_WARN_DAYS` (default 30), and another when it recovers. A download folder on a separate volume gets its own card.
+
+### Downloads stored twice
+Sonarr and Radarr can hardlink an imported download into your library, so a torrent can keep seeding without using extra space. When that silently falls back to copying, every import uses its space twice. To check for this, mount your download folder read-only and set `MG_DOWNLOADS`:
+
+```yaml
+    environment:
+      MG_DOWNLOADS: "/downloads"
+    volumes:
+      - /volume1/Downloads:/downloads:ro
+```
+
+After the next scan, **Cleanup** lists:
+- **Download stored twice (not hardlinked):** a download with the same contents as a library file (same size; the first and last 64 KiB compared) but a separate copy on disk. If the panel says the download folder is on a different volume, hardlinks can't work there at all. In that case, move downloads onto the same volume or shared folder as the media.
+- **Download with no library copy:** a video older than `MG_UNIMPORTED_DAYS` (default 7) that exists only in downloads. It was never imported, or the library copy was replaced, for example re-encoded by Shrinkarr, so the seeding copy now uses its own space.
+
+If the download folder is inside the media share (for example `/media/Downloads`), set `MG_DOWNLOADS` to that path. It is then left out of the library totals.
+
+### Leftovers and clutter in the library
+Every complete scan also lists:
+- **Shrinkarr leftover files** (`*.shrinkarr.bak`, `*.shrinkarr.bak.txn`, `*.shrinkarr.tmp.*`) older than a day. These mean a replacement was interrupted, so check the original plays before deleting anything. New ones raise a warning.
+- **Incomplete downloads** (`.part`, `.!qB`, `.!ut`, `.crdownload`, `.partial`) older than a day.
+- **Sample clips** under 500 MiB with "sample" in the name.
+- **Empty folders.** Folders holding only NAS thumbnail folders like `@eaDir` count as empty.
+- **Folders with subtitles or `.nfo` files but no video**, usually what's left after a movie or episode was deleted. Folders containing audio files are ignored, so music libraries aren't flagged.
+
+A file that changes and shrinks by more than `MG_SHRINK_ALERT_PERCENT` (default 90%) in one go raises a warning. A normal re-encode rarely loses that much, so it's worth checking the file still plays in full.
+
+MediaGuardian only reports. It never deletes or moves anything; the media and download mounts stay read-only.
+
+### New API endpoints
+`GET /api/space` and `GET /api/findings?kind=<kind>`.
 
 
 ## v0.3 upgrade: stack status, schedules and alerts

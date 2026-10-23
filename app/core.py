@@ -20,6 +20,7 @@ SETTLE_SECONDS = max(0, int(os.getenv("MG_SETTLE_SECONDS", "300")))
 # vanish in one scan, hold off marking them missing until the next scan agrees.
 MISSING_GUARD_PERCENT = max(0.0, float(os.getenv("MG_MISSING_GUARD_PERCENT", "10")))
 MISSING_GUARD_MIN = max(1, int(os.getenv("MG_MISSING_GUARD_MIN", "25")))
+SHRINK_ALERT_PERCENT = max(0.0, float(os.getenv("MG_SHRINK_ALERT_PERCENT", "90")))
 EXCLUDE_DIRS = {
     name.strip().lower() for name in os.getenv("MG_EXCLUDE", "").split(",") if name.strip()
 } | {"lost+found", "$recycle.bin", "system volume information"}
@@ -45,6 +46,20 @@ def init_db():
             status TEXT NOT NULL, probe_json TEXT, issue TEXT
         )""")
         db.execute("CREATE INDEX IF NOT EXISTS ix_files_status ON files(status)")
+        columns = {row["name"] for row in db.execute("PRAGMA table_info(files)")}
+        for column in ("ino", "dev", "nlink"):
+            if column not in columns:
+                db.execute(f"ALTER TABLE files ADD COLUMN {column} INTEGER")
+        db.execute("CREATE INDEX IF NOT EXISTS ix_files_size ON files(size)")
+        db.execute("""CREATE TABLE IF NOT EXISTS findings (
+            kind TEXT NOT NULL, path TEXT NOT NULL, size INTEGER NOT NULL,
+            detail TEXT, found_at INTEGER NOT NULL, PRIMARY KEY (kind, path)
+        )""")
+        db.execute("""CREATE TABLE IF NOT EXISTS capacity (
+            at INTEGER NOT NULL, label TEXT NOT NULL, total INTEGER NOT NULL, free INTEGER NOT NULL
+        )""")
+        db.execute("CREATE INDEX IF NOT EXISTS ix_capacity_at ON capacity(at)")
+        db.execute("CREATE TABLE IF NOT EXISTS kv (key TEXT PRIMARY KEY, value TEXT)")
         db.execute("""CREATE TABLE IF NOT EXISTS scans (
             id INTEGER PRIMARY KEY AUTOINCREMENT, started_at INTEGER NOT NULL,
             finished_at INTEGER NOT NULL, trigger TEXT NOT NULL, complete INTEGER NOT NULL,
@@ -109,7 +124,7 @@ def _note_error(summary, exc):
     STATE["last_error"] = summary["error_sample"]
 
 
-def _resolve_vanished(db, scan_id, present_before, unreadable, summary):
+def _resolve_vanished(db, scan_id, present_before, unreadable, summary, dropped=()):
     """Decide what happens to indexed files the walk didn't see this time."""
     rows = db.execute(
         "SELECT path FROM files WHERE checked_at < ? AND status != 'missing'", (scan_id,)
@@ -117,7 +132,7 @@ def _resolve_vanished(db, scan_id, present_before, unreadable, summary):
     vanished, keep, drop = [], [], []
     for row in rows:
         path = row["path"]
-        if excluded(path):
+        if excluded(path) or any(path.startswith(prefix + "/") for prefix in dropped):
             drop.append((path,))
         elif any(path.startswith(prefix + "/") for prefix in unreadable):
             keep.append((path,))
@@ -169,7 +184,9 @@ def scan_once(reserved=False, trigger="manual"):
         "changed": 0, "restored": 0, "missing_marked": 0, "missing_held": 0,
         "missing_share": 0, "missing_sample": [], "new_issues": 0, "issue_sample": [],
         "errors": 0, "error_sample": None, "fatal": None,
+        "folder_findings": [], "shrunk": [], "new_findings": [],
     }
+    from . import cleanup
     try:
         root = MEDIA.resolve(strict=True)
         if not root.is_dir():
@@ -177,6 +194,8 @@ def scan_once(reserved=False, trigger="manual"):
         scan_id = time.time_ns()
         settled_before = time.time() - SETTLE_SECONDS
         unreadable = []
+        download_dirs = cleanup.download_root_strings()
+        leftover_before = time.time() - cleanup.LEFTOVER_HOURS * 3600
         pending = [root]
         with connect() as db:
             present_before = db.execute(
@@ -185,21 +204,51 @@ def scan_once(reserved=False, trigger="manual"):
             os.scandir(root).close()  # an unreadable root must fail the scan, not empty it
             while pending and summary["seen"] < MAX_FILES:
                 folder = pending.pop()
+                tally = cleanup.FolderTally()
                 try:
                     with os.scandir(folder) as entries:
                         for entry in entries:
                             relpath = None
                             try:
                                 if entry.is_symlink():
+                                    tally.entries += 1
                                     continue
                                 if entry.is_dir(follow_symlinks=False):
-                                    if not skip_dir(entry.name):
+                                    if skip_dir(entry.name):
+                                        continue
+                                    tally.entries += 1
+                                    tally.subdirs += 1
+                                    if entry.path not in download_dirs:
                                         pending.append(Path(entry.path))
                                     continue
-                                if not entry.is_file(follow_symlinks=False) or skip_file(entry.name):
+                                if not entry.is_file(follow_symlinks=False) or cleanup.ignored_file(entry.name):
                                     continue
+                                tally.entries += 1
+                                junk = cleanup.junk_kind(entry.name)
+                                suffix = Path(entry.name).suffix.lower()
+                                if suffix in cleanup.SIDECAR_SUFFIXES and not junk:
+                                    tally.sidecars += 1
+                                    continue
+                                if junk:
+                                    st = entry.stat(follow_symlinks=False)
+                                    if st.st_mtime < leftover_before:
+                                        summary["folder_findings"].append((
+                                            junk, str(Path(entry.path).relative_to(root)), st.st_size,
+                                            "Older than a day; safe to delete once you've checked it",
+                                        ))
+                                    continue
+                                if suffix in cleanup.AUDIO_SUFFIXES:
+                                    tally.audio += 1
+                                    continue
+                                if skip_file(entry.name):
+                                    continue
+                                tally.videos += 1
                                 relpath = str(Path(entry.path).relative_to(root))
                                 st = entry.stat(follow_symlinks=False)
+                                if cleanup.is_sample(entry.name, st.st_size):
+                                    summary["folder_findings"].append((
+                                        "sample_file", relpath, st.st_size, "Sample clip left by a release",
+                                    ))
                                 prior = db.execute(
                                     "SELECT size,mtime_ns,status,probe_json,issue FROM files WHERE path=?",
                                     (relpath,),
@@ -211,6 +260,8 @@ def scan_once(reserved=False, trigger="manual"):
                                     summary["restored"] += 1
                                 elif not unchanged:
                                     summary["changed"] += 1
+                                    if prior["size"] and st.st_size < prior["size"] * (1 - SHRINK_ALERT_PERCENT / 100):
+                                        summary["shrunk"].append((relpath, prior["size"], st.st_size))
                                 status = "empty" if st.st_size == 0 else "inventory"
                                 issue = "File is zero bytes" if st.st_size == 0 else None
                                 probe = None
@@ -228,13 +279,15 @@ def scan_once(reserved=False, trigger="manual"):
                                     if len(summary["issue_sample"]) < 5:
                                         summary["issue_sample"].append(relpath)
                                 db.execute(
-                                    """INSERT INTO files(path,size,mtime_ns,checked_at,status,probe_json,issue)
-                                    VALUES (?,?,?,?,?,?,?)
+                                    """INSERT INTO files(path,size,mtime_ns,checked_at,status,probe_json,issue,ino,dev,nlink)
+                                    VALUES (?,?,?,?,?,?,?,?,?,?)
                                     ON CONFLICT(path) DO UPDATE SET
                                     size=excluded.size,mtime_ns=excluded.mtime_ns,
                                     checked_at=excluded.checked_at,status=excluded.status,
-                                    probe_json=excluded.probe_json,issue=excluded.issue""",
-                                    (relpath, st.st_size, st.st_mtime_ns, scan_id, status, probe, issue),
+                                    probe_json=excluded.probe_json,issue=excluded.issue,
+                                    ino=excluded.ino,dev=excluded.dev,nlink=excluded.nlink""",
+                                    (relpath, st.st_size, st.st_mtime_ns, scan_id, status, probe, issue,
+                                     st.st_ino, st.st_dev, st.st_nlink),
                                 )
                                 summary["seen"] += 1
                                 STATE["scanned"] = summary["seen"]
@@ -249,12 +302,26 @@ def scan_once(reserved=False, trigger="manual"):
                                 if relpath:
                                     # Keep a file we failed to read from being reported missing.
                                     db.execute("UPDATE files SET checked_at=? WHERE path=?", (scan_id, relpath))
+                    if folder != root:
+                        finding = tally.finding(str(folder.relative_to(root)))
+                        if finding:
+                            summary["folder_findings"].append(finding)
                 except OSError as exc:
                     _note_error(summary, exc)
                     unreadable.append(str(folder.relative_to(root)))
             if not pending and summary["seen"] < MAX_FILES:
                 summary["complete"] = 1
-                _resolve_vanished(db, scan_id, present_before, unreadable, summary)
+                inside = [Path(d) for d in download_dirs if Path(d).is_relative_to(root)]
+                _resolve_vanished(
+                    db, scan_id, present_before, unreadable, summary,
+                    [str(d.relative_to(root)) for d in inside],
+                )
+                summary["new_findings"] = cleanup.save_findings(db, summary["folder_findings"], cleanup.WALK_KINDS)
+                if download_dirs:
+                    downloads, _ = cleanup.walk_downloads()
+                    summary["new_findings"] += cleanup.save_findings(
+                        db, cleanup.download_findings(db, downloads), cleanup.DOWNLOAD_KINDS,
+                    )
             summary["finished_at"] = int(time.time())
             _save_scan(db, summary)
     except Exception as exc:

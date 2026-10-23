@@ -4,7 +4,7 @@ import threading
 import time
 from datetime import datetime
 
-from . import core, events, stack
+from . import cleanup, core, events, stack
 
 SCAN_INTERVAL_MINUTES = max(0, int(os.getenv("MG_SCAN_INTERVAL_MINUTES", "360")))
 SCAN_WINDOW = os.getenv("MG_SCAN_WINDOW", "").strip()
@@ -54,11 +54,53 @@ def report(summary):
     if summary["new_issues"]:
         names = ", ".join(summary["issue_sample"])
         events.record("warning", "new_issues", f"{summary['new_issues']:,} new file issues: {names}")
+    for path, before, after in summary["shrunk"][:5]:
+        events.record(
+            "warning", "file_shrunk",
+            f"{path} shrank from {size_text(before)} to {size_text(after)}. Check it still plays in full.",
+        )
+    leftovers = [f for f in summary["new_findings"] if f[0] == "shrinkarr_leftover"]
+    if leftovers:
+        events.record(
+            "warning", "shrinkarr_leftover",
+            f"{len(leftovers)} Shrinkarr leftover files found, e.g. {leftovers[0][1]}. "
+            "A replacement may have been interrupted.",
+        )
+    if summary["new_findings"]:
+        reclaim = sum(f[2] for f in summary["new_findings"])
+        events.record(
+            "info", "cleanup_found",
+            f"{len(summary['new_findings']):,} new cleanup items ({size_text(reclaim)}). See Space & cleanup.",
+        )
     if summary["errors"]:
         events.record(
             "info", "read_errors",
             f"{summary['errors']:,} files or folders could not be read: {summary['error_sample']}",
         )
+
+
+def size_text(n):
+    for unit in ("B", "KiB", "MiB", "GiB"):
+        if n < 1024:
+            return f"{n:.0f} {unit}" if unit == "B" else f"{n:.1f} {unit}"
+        n /= 1024
+    return f"{n:.2f} TiB"
+
+
+def check_capacity():
+    """Sample free space (at most hourly) and alert once when a volume runs low."""
+    if not cleanup.sample_capacity():
+        return
+    for item in cleanup.capacity():
+        key = f"disk_alert:{item['label']}"
+        problem = cleanup.capacity_problem(item)
+        with core.DB_LOCK, core.connect() as db:
+            flagged = cleanup.get_flag(db, key)
+            cleanup.set_flag(db, key, "1" if problem else "")
+        if problem and not flagged:
+            events.record("warning", "disk_low", problem)
+        elif flagged and not problem:
+            events.record("info", "disk_ok", f"{item['label']} has enough free space again")
 
 
 def run_scan(trigger="manual", reserved=False):
@@ -82,6 +124,10 @@ def scan_due(now, started_at):
 def scheduler(stop):
     started_at = time.time()
     while not stop.wait(TICK_SECONDS):
+        try:
+            check_capacity()
+        except Exception as exc:  # a failed sample must not stop scheduled scans
+            core.STATE["last_error"] = f"Capacity check failed: {exc}"[:500]
         if scan_due(time.time(), started_at) and core.reserve_scan():
             run_scan("scheduled", reserved=True)
 
