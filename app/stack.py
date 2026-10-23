@@ -58,7 +58,13 @@ def load_config():
                 raise ValueError(f"Each service needs a name and an http(s) url: {item!r:.80}")
             if kind not in TYPES:
                 raise ValueError(f"Unknown type {kind!r} for {name}; use one of {', '.join(TYPES)}")
-            config.append({"name": name, "url": url, "type": kind, "api_key": item.get("api_key") or ""})
+            path_map = item.get("path_map") or {}
+            if not isinstance(path_map, dict) or not all(isinstance(v, str) for v in path_map.values()):
+                raise ValueError(f"path_map for {name} must map app paths to media folders, e.g. {{\"/data/media\": \"\"}}")
+            config.append({
+                "name": name, "url": url, "type": kind, "api_key": item.get("api_key") or "",
+                "path_map": {str(k).rstrip("/") or "/": v.strip("/") for k, v in path_map.items()},
+            })
         STATE.update(config=config, config_error=None, config_mtime=mtime)
     except (OSError, ValueError, AttributeError) as exc:
         STATE.update(config_error=str(exc)[:300], config_mtime=mtime)

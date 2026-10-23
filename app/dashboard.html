@@ -22,6 +22,7 @@ code{background:#0e1a29;padding:2px 6px;border-radius:6px;overflow-wrap:anywhere
 <div class="actions"><span class="pill" id="state">Idle</span><button id="scan">Start scan</button><button id="refresh" class="secondary">Refresh</button></div>
 <p id="message" role="status"></p>
 <section class="card"><div class="head"><h2>Media stack</h2><span class="muted" id="stackInfo"></span></div><div id="stack" class="grid" style="margin:0"></div></section>
+<section class="card" style="margin-top:16px"><div class="head"><h2>Library checks</h2><button id="crosscheck" class="secondary">Check now</button></div><p class="muted">Compares Sonarr, Radarr, Jellyfin, Emby and Plex with what's actually on disk, using the API keys in services.json.</p><div id="checkApps"></div><div id="checks"></div></section>
 <section class="card" style="margin-top:16px"><div class="head"><h2>Alerts</h2><button id="ack" class="secondary">Dismiss all</button></div><div id="events">No alerts.</div></section>
 <div class="grid">
 <section class="card"><div class="muted">Media files</div><div class="metric" id="files">—</div></section>
@@ -70,7 +71,18 @@ function renderScans(list){
   for(const v of [when(s.finished_at),s.trigger,s.seen.toLocaleString()+(s.complete?'':' (partial)'),s.new_files+s.restored,s.changed,missing,s.new_issues,s.errors])tr.append(el('td',null,String(v)));body.append(tr)}
 }
 const bytes=n=>{const u=['B','KiB','MiB','GiB','TiB'];let i=0;while(n>=1024&&i<u.length-1){n/=1024;i++}return (i?n.toFixed(1):n)+' '+u[i]};
-let lastCleanup='';
+function renderChecks(data){
+ const apps=$('checkApps');apps.replaceChildren();
+ $('crosscheck').disabled=!data.services.length&&!data.without_key.length;
+ if(!data.services.length&&!data.without_key.length){apps.append(el('p','muted','Add Sonarr, Radarr, Jellyfin, Emby or Plex with an api_key to services.json to turn these checks on.'))}
+ for(const a of data.services){
+  const line=el('p',a.error?'alert':'muted');
+  line.textContent=a.name+': '+(a.error?a.error:'checked '+when(a.checked_at));
+  apps.append(line);
+  if(a.unmapped.length){const w=el('p','warn','⚠ '+a.name+' library folder not found on the media share: '+a.unmapped.join(', ')+'. Add a path_map for it in services.json.');apps.append(w)}}
+ if(data.without_key.length)apps.append(el('p','muted','No api_key, so not checked: '+data.without_key.join(', ')));
+ renderFindings($('checks'),data.summary,data.services.length?'Everything matches.':'',false);
+}
 function renderSpace(space){
  const box=$('capacity');box.replaceChildren();
  if(!space.capacity.length)box.append(el('p','muted','Measuring free space…'));
@@ -84,13 +96,18 @@ function renderSpace(space){
  if(!space.downloads.length)note.textContent='Set MG_DOWNLOADS to also check for downloads stored twice instead of hardlinked.';
  else if(space.volumes_match===false){note.className='warn';note.textContent='⚠ Downloads are on a different volume from your media, so hardlinks can\'t work: every import is a full copy.'}
  else note.textContent='Checking downloads in '+space.downloads.join(', ');
- const key=JSON.stringify(space.cleanup);if(key===lastCleanup)return;lastCleanup=key;
- const list=$('cleanup');list.replaceChildren();
- const items=space.cleanup.filter(c=>c.count);const total=items.reduce((a,c)=>a+c.bytes,0);
- $('reclaim').textContent=items.length?bytes(total)+' to review':'';
- if(!items.length){list.append(el('p',null,'Nothing to clean up.'));return}
+ const total=space.cleanup.reduce((a,c)=>a+c.bytes,0);
+ $('reclaim').textContent=total?bytes(total)+' to review':'';
+ renderFindings($('cleanup'),space.cleanup,'Nothing to clean up.',true);
+}
+const shown={};
+function renderFindings(list,groups,empty,withSize){
+ const key=JSON.stringify(groups);if(shown[list.id]===key)return;shown[list.id]=key;
+ list.replaceChildren();
+ const items=groups.filter(c=>c.count);
+ if(!items.length){list.append(el('p',null,empty));return}
  for(const c of items){
-  const d=el('details');const sum=el('summary');sum.append(el('strong',null,c.label),el('span',null,c.count.toLocaleString()+' • '+bytes(c.bytes)));d.append(sum);
+  const d=el('details');const sum=el('summary');sum.append(el('strong',null,c.label),el('span',null,c.count.toLocaleString()+(withSize&&c.bytes?' • '+bytes(c.bytes):'')));d.append(sum);
   d.ontoggle=async()=>{if(!d.open||d.dataset.loaded)return;d.dataset.loaded='1';try{const rows=await api('/api/findings?kind='+c.kind);
    for(const r of rows){const f=el('div','finding');f.append(el('div',null,r.path+(r.size?' — '+bytes(r.size):'')),el('p','muted',r.detail||''));d.append(f)}
    if(rows.length<c.count)d.append(el('p','muted','Showing the largest '+rows.length+'.'))}catch(e){d.append(el('p','alert',e.message))}};
@@ -98,8 +115,8 @@ function renderSpace(space){
 }
 async function refresh(){
  try{
- const [data,issues,libraries,stack,events,scans,space]=await Promise.all([api('/api/status'),api('/api/issues'),api('/api/libraries'),api('/api/stack'),api('/api/events'),api('/api/scans?limit=10'),api('/api/space')]);
- renderStack(stack);renderEvents(events);renderScans(scans);renderSpace(space);
+ const [data,issues,libraries,stack,events,scans,space,checks]=await Promise.all([api('/api/status'),api('/api/issues'),api('/api/libraries'),api('/api/stack'),api('/api/events'),api('/api/scans?limit=10'),api('/api/space'),api('/api/consistency')]);
+ renderStack(stack);renderEvents(events);renderScans(scans);renderSpace(space);renderChecks(checks);
  $('files').textContent=data.total_files.toLocaleString();$('bytes').textContent=(data.bytes/1099511627776).toFixed(2)+' TiB';
  $('probed').textContent=(data.statuses.ok||0).toLocaleString();
  $('issueCount').textContent=issues.length.toLocaleString()+(issues.length===500?'+':'');
@@ -118,6 +135,7 @@ async function refresh(){
 $('loginForm').onsubmit=async e=>{e.preventDefault();$('loginError').textContent='';try{await api('/auth/login',{method:'POST',body:JSON.stringify({username:$('username').value,password:$('password').value})});$('password').value='';showApp()}catch(err){$('loginError').textContent=err.message}};
 $('scan').onclick=async()=>{try{await api('/api/scan',{method:'POST'});$('message').textContent='Scan started';refresh()}catch(e){$('message').textContent=e.status===409?'Scan already in progress.':e.message}};
 $('refresh').onclick=refresh;
+$('crosscheck').onclick=async()=>{try{await api('/api/consistency/run',{method:'POST'});$('message').textContent='Checking your apps…';setTimeout(refresh,3000)}catch(e){$('message').textContent=e.status===409?'A check is already running.':e.message}};
 $('ack').onclick=async()=>{try{await api('/api/events/ack',{method:'POST'});refresh()}catch(e){$('message').textContent=e.message}};
 $('logout').onclick=async()=>{try{await api('/auth/logout',{method:'POST'})}finally{showLogin()}};
 api('/auth/me').then(showApp).catch(showLogin);

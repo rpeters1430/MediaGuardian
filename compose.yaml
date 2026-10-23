@@ -23,6 +23,8 @@ services:
       MG_SETTLE_SECONDS: "300"
       MG_EXCLUDE: ""
       MG_SERVICE_INTERVAL: "60"
+      # How often to compare Sonarr/Radarr/Jellyfin/Plex with the disk (API calls only).
+      MG_CROSSCHECK_MINUTES: "60"
       # Download folder(s) as seen inside the container, comma-separated. Enables the
       # "stored twice" and "not in library" reports. Mount them read-only below.
       MG_DOWNLOADS: ""

@@ -29,10 +29,53 @@ Pull requests run tests and build checks. A tag `v0.1.0` triggers GHCR publishin
 
 ## Roadmap
 - **v0.3:** scheduled scans, scan history, mass-disappearance guard, alerts with ntfy/Discord notifications, media stack status
-- **v0.4 (this release):** hardlink and orphan reports, Shrinkarr leftover audit, disk capacity forecast
-- **v0.5:** Jellyfin/Plex and Sonarr/Radarr cross-checks (library vs disk), permission checks
+- **v0.4:** hardlink and orphan reports, Shrinkarr leftover audit, disk capacity forecast
+- **v0.5 (this release):** Jellyfin/Emby/Plex and Sonarr/Radarr cross-checks (library vs disk), stuck imports, permission checks
 - **v0.6:** playability flags (audio/subtitle languages, codecs), suggestions for Shrinkarr, muting issues
 - **Later:** approval-based repair suggestions with a full audit trail. Repairs run in Shrinkarr or the *arr apps; MediaGuardian stays read-only.
+
+
+## v0.5 upgrade: library checks
+
+Pull the new image. The database is upgraded in place. If you use the `services.json` from v0.3, the new checks start as soon as the apps in it have an `api_key`.
+
+### What gets checked
+The **Library checks** panel compares each app with the files MediaGuardian indexed on disk. It runs after every scan and every `MG_CROSSCHECK_MINUTES` (default 60) in between. These runs only call the apps' APIs; they don't read the disks. **Check now** runs it immediately.
+
+| Finding | Apps | Meaning |
+|---|---|---|
+| Sonarr/Radarr expect a file that isn't on disk | Sonarr, Radarr | Radarr says a movie has a file that's gone, or Sonarr lists more episode files for a series than are on disk |
+| Download stuck in the queue | Sonarr, Radarr | Queue items in `importPending`, `importBlocked`, `importFailed` or `failedPending`, or flagged with a warning or error, with Sonarr/Radarr's own message |
+| Folder Sonarr/Radarr don't manage | Sonarr, Radarr | Video folders inside a root folder that don't belong to any series or movie, such as manual copies or leftovers from deleted entries |
+| Media server item whose file is gone | Jellyfin, Emby, Plex | The server still lists the item, but the file was moved or deleted |
+| File your media server hasn't picked up | Jellyfin, Emby, Plex | A video in one of the server's movie or TV library folders, more than a day old, that the server doesn't list. Usually a naming problem, a permission problem or a missed library scan |
+| File or folder MediaGuardian can't read | (scan) | Permission denied during a scan |
+
+Extras (`Featurettes/`, `Trailers/`, `*-trailer.mkv` and similar) and sample clips are ignored. Jellyfin and Emby report only one file per movie, so alternate versions (`Movie - 4K.mkv`) can show as "not picked up". Plex reports all of them.
+
+New items raise alerts. Missing files and stuck downloads are warnings; untracked folders and files the server hasn't picked up are info. An app that can't be reached, or rejects its key, raises one warning and keeps its previous findings until it answers again.
+
+### API keys
+Add `api_key` to each app in `services.json`:
+- **Sonarr / Radarr:** Settings → General → API Key.
+- **Jellyfin / Emby:** Dashboard → API Keys → add one.
+- **Plex:** your `X-Plex-Token` ([how to find it](https://support.plex.tv/articles/204059436-finding-an-authentication-token-x-plex-token/)).
+
+MediaGuardian only calls read endpoints. It never changes anything in these apps.
+
+### Paths
+Each app sees your media under its own container path, such as `/data/media/movies` or `/tv`. MediaGuardian matches each library or root folder to a folder in its own media share by the end of the path, ignoring case. So `/data/media/movies` finds `Movies`, and `/tv` finds `TV`. If a folder can't be matched, the panel names it. Add a `path_map` from the app's path to the matching folder inside the media share (`""` is the share itself):
+
+```json
+{"name": "Radarr", "type": "radarr", "url": "http://192.168.1.10:7878", "api_key": "...",
+ "path_map": {"/data/media": ""}}
+```
+
+### Permissions
+A file MediaGuardian can't read is listed under **File or folder MediaGuardian can't read**. The check uses MediaGuardian's own user (`user:` in `compose.yaml`, `1000:10` by default), so it respects ACLs. Run MediaGuardian as the same user and group as Jellyfin or Plex, and anything listed here is also something your media server can't play.
+
+### New API endpoints
+`GET /api/consistency` and `POST /api/consistency/run`. `GET /api/findings?kind=` accepts the new kinds.
 
 
 ## v0.4 upgrade: space and cleanup

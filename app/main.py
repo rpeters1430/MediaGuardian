@@ -8,7 +8,7 @@ from fastapi import Depends, FastAPI, HTTPException, Request, Response
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
-from . import auth, cleanup, core, events, guardian, stack
+from . import auth, cleanup, core, crosscheck, events, guardian, stack
 
 
 class LoginBody(BaseModel):
@@ -28,7 +28,7 @@ async def lifespan(app):
 
 
 app = FastAPI(
-    title="MediaGuardian", version="0.4.0", lifespan=lifespan,
+    title="MediaGuardian", version="0.5.0", lifespan=lifespan,
     docs_url=None, redoc_url=None, openapi_url=None,
 )
 
@@ -134,9 +134,23 @@ def space(user: str = Depends(auth.check_session)):
 
 @app.get("/api/findings")
 def findings(kind: str | None = None, limit: int = 200, user: str = Depends(auth.check_session)):
-    if kind is not None and kind not in cleanup.KINDS:
+    if kind is not None and kind not in cleanup.KINDS and kind not in crosscheck.KINDS:
         raise HTTPException(400, "Unknown finding kind")
     return cleanup.list_findings(kind, limit)
+
+
+@app.get("/api/consistency")
+def consistency(user: str = Depends(auth.check_session)):
+    return crosscheck.snapshot()
+
+
+@app.post("/api/consistency/run", status_code=202)
+def run_consistency(request: Request, user: str = Depends(auth.check_session)):
+    auth.same_origin(request)
+    if crosscheck.RUN_LOCK.locked():
+        raise HTTPException(409, "Check already running")
+    threading.Thread(target=guardian.run_crosscheck, daemon=True).start()
+    return {"accepted": True}
 
 
 @app.get("/api/stack")
