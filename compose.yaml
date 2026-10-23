@@ -11,10 +11,18 @@ services:
     environment:
       MG_DATA_DIR: /data
       MG_MEDIA_ROOT: /media
-      MG_MAX_PROBES_PER_SCAN: "30"
+      TZ: ${TZ:-America/Los_Angeles}
+      MG_MAX_PROBES_PER_SCAN: "200"
       MG_PROBE_TIMEOUT: "12"
       MG_FILE_SLEEP: "0.02"
       MG_MAX_FILES: "250000"
+      # Automatic scans. Every scan walks the whole share, so frequent scans keep
+      # HDDs from spinning down. MG_SCAN_WINDOW limits scheduled scans to quiet hours.
+      MG_SCAN_INTERVAL_MINUTES: "360"
+      MG_SCAN_WINDOW: ""
+      MG_SETTLE_SECONDS: "300"
+      MG_EXCLUDE: ""
+      MG_SERVICE_INTERVAL: "60"
     volumes:
       - /volume1/docker/mediaguardian:/data:rw
       - /volume1/Media:/media:ro

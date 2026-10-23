@@ -5,6 +5,7 @@ from pathlib import Path
 os.environ.setdefault("MG_USERNAME", "admin")
 os.environ.setdefault("MG_PASSWORD", "test-password-longer-than-12")
 os.environ.setdefault("MG_SESSION_SECRET", "test-session-secret-longer-than-32-characters")
+os.environ["MG_BACKGROUND"] = "0"
 
 from fastapi.testclient import TestClient
 from app import core  # noqa: E402
@@ -35,10 +36,12 @@ def test_empty_and_missing_files(monkeypatch):
         core.init_db()
         movie = media / "movie.mkv"
         movie.touch()
+        (media / "other.mkv").touch()
         assert core.scan_once()
-        assert core.stats()["statuses"]["empty"] == 1
+        assert core.stats()["statuses"]["empty"] == 2
         movie.unlink()
-        assert core.scan_once()
+        summary = core.scan_once()
+        assert summary["missing_marked"] == 1
         assert core.stats()["statuses"]["missing"] == 1
 
 

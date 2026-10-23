@@ -4,9 +4,9 @@ Lightweight, read-only media library inventory and health dashboard for UGREEN N
 
 ## Safety
 - Read-only mount of media files; no automatic deletion, renaming, repair or transcoding.
-- No Docker socket, privileged mode, or outbound control plane.
+- No Docker socket, privileged mode, or outbound control plane. The only outbound requests are read-only checks of the apps you list in `services.json` and the notification URLs you configure.
 - Single container, single worker, CPU limited to 1, memory limited to 512 MB.
-- Scanner skips symlinks and performs at most 30 bounded ffprobe checks per run.
+- Scanner skips symlinks and NAS housekeeping folders, waits for files to stop changing before probing them, and performs a bounded number of ffprobe checks per run.
 - Scanner does **not** decode all frames, so an "ok" result is not proof a file is uncorrupted.
 - Authenticated API, localhost-bound port by default. The dashboard page itself is public on that bound interface.
 - Do not expose port 8186 directly to the Internet.
@@ -28,10 +28,54 @@ docker build -t mediaguardian:local .
 Pull requests run tests and build checks. A tag `v0.1.0` triggers GHCR publishing for `linux/amd64`. **No container image is published before a tag or manual publication workflow succeeds.**
 
 ## Roadmap
-1. Per-library scan schedules and scan history
-2. Jellyfin, Plex and Emby read-only API integration
-3. Sonarr/Radarr import diagnostics
-4. Approval-based repair suggestions, with full audit trail
+- **v0.3 (this release):** scheduled scans, scan history, mass-disappearance guard, alerts with ntfy/Discord notifications, media stack status
+- **v0.4:** hardlink and orphan reports, Shrinkarr leftover audit, disk capacity forecast
+- **v0.5:** Jellyfin/Plex and Sonarr/Radarr cross-checks (library vs disk), permission checks
+- **v0.6:** playability flags (audio/subtitle languages, codecs), suggestions for Shrinkarr, muting issues
+- **Later:** approval-based repair suggestions with a full audit trail. Repairs run in Shrinkarr or the *arr apps; MediaGuardian stays read-only.
+
+
+## v0.3 upgrade: stack status, schedules and alerts
+
+Pull the new image and update `compose.yaml` (it adds `TZ` and the scan settings below). Your existing database is upgraded in place.
+
+### Watch the rest of your media stack
+Copy `services.example.json` to `/volume1/docker/mediaguardian/services.json`, then edit it to list your apps. Changes are picked up within a minute; no restart needed.
+
+```json
+[
+  {"name": "Jellyfin", "type": "jellyfin", "url": "http://192.168.1.10:8096"},
+  {"name": "Sonarr", "type": "sonarr", "url": "http://192.168.1.10:8989", "api_key": "SONARR_API_KEY"}
+]
+```
+
+Supported types: `jellyfin`, `emby`, `plex`, `sonarr`, `radarr`, `lidarr`, `readarr`, `prowlarr`, `jellyseerr`, `overseerr`, `qbittorrent`, `shrinkarr`, and `generic` (checks the URL as given). Use the NAS's LAN IP rather than `localhost`, which means the MediaGuardian container itself.
+
+Each app is checked every `MG_SERVICE_INTERVAL` seconds. Any HTTP reply below 500 counts as up, so a login page still shows the app is running. An app is reported down after two failed checks in a row. For Sonarr, Radarr, Lidarr, Readarr and Prowlarr, adding an `api_key` (Settings → General) also shows the app's own health warnings, such as an unreachable download client or failing indexers. The key is only sent to that app and is never shown in the dashboard. `services.json` holds API keys, so run `chmod 600` on it.
+
+### Scheduled scans
+| Setting | Default | Meaning |
+|---|---|---|
+| `MG_SCAN_INTERVAL_MINUTES` | `360` | Minutes between automatic scans. `0` turns them off. |
+| `MG_SCAN_WINDOW` | empty | Only start automatic scans in these hours, e.g. `1-7` for 01:00–06:59. Wrapping past midnight (`22-6`) works. |
+| `MG_MAX_PROBES_PER_SCAN` | `200` | New or changed files probed with ffprobe per scan. |
+| `MG_SETTLE_SECONDS` | `300` | Files modified more recently than this are listed but not probed yet. |
+| `MG_EXCLUDE` | empty | Extra folder names to skip, comma-separated, e.g. `Downloads,Extras`. |
+
+Folders starting with `.`, `@` or `#` (`@eaDir`, `#recycle`, `.Trash-1000`), Shrinkarr's `*.shrinkarr.tmp.*` work files and macOS `._` files are always skipped.
+
+Every scan walks the whole share. Frequent scans stop HDDs from spinning down, so keep the interval in hours and use `MG_SCAN_WINDOW` if your drives sleep.
+
+### Alerts and notifications
+The **Alerts** panel lists warnings until you dismiss them. Alerts are raised for:
+- **Mass disappearance:** if at least 25 files and 10% of the library vanish in one scan, or the share looks empty, MediaGuardian does *not* mark them missing. It raises a critical alert first, usually a share that isn't mounted. If the next scan also can't find them, they are marked missing. Tune with `MG_MISSING_GUARD_MIN` and `MG_MISSING_GUARD_PERCENT`.
+- Files that went missing, new zero-byte or unreadable files, and folders that couldn't be read. An unreadable folder no longer stops missing-file detection for the rest of the library, and files inside it aren't reported missing.
+- Apps that go down or come back, and new health warnings from the *arr apps.
+
+To get push notifications, set `MG_NTFY_URL` (a full topic URL such as `https://ntfy.sh/your-topic`, plus `MG_NTFY_TOKEN` if the topic is protected) and/or `MG_DISCORD_WEBHOOK` in `.env`. Warnings, critical alerts and app recoveries are sent.
+
+### New API endpoints
+`GET /api/stack`, `GET /api/events`, `POST /api/events/ack`, `GET /api/scans`. All require a signed-in session.
 
 
 ## v0.2 upgrade: username/password login
