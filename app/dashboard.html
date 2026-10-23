@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>MediaGuardian</title>
+<style>
+:root{color-scheme:dark;font:16px system-ui,sans-serif;background:#0b1220;color:#ebf2ff}
+*{box-sizing:border-box}body{margin:0}header{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:20px max(20px,calc((100vw - 1120px)/2));border-bottom:1px solid #25354b;background:#101b2b}h1{margin:0;font-size:1.4rem}
+main{max-width:1120px;margin:auto;padding:22px}h2{font-size:1.08rem;margin:0 0 14px}p{color:#aebdd1}
+.grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:16px;margin:18px 0}.card{background:#17253a;border:1px solid #2b4058;border-radius:16px;padding:20px;min-width:0}.metric{font-size:2rem;font-weight:750;word-break:break-word}.muted{color:#a8bad0;font-size:.9rem}
+button,input{font:inherit;border-radius:10px;padding:12px 14px;border:1px solid #435974}button{background:#256b9e;color:white;border-color:#3487c0;cursor:pointer}button:disabled{opacity:.5;cursor:default}button.secondary{background:#1a2b41}input{background:#0e1a29;color:white;width:100%;margin:8px 0 14px}
+.actions{display:flex;gap:10px;align-items:center;flex-wrap:wrap}.hide{display:none!important}.auth{max-width:430px;margin:10vh auto}.alert{color:#ffbdbd;min-height:24px}.good{color:#6fe0b1}.issue{padding:12px 0;border-bottom:1px solid #31425a;overflow-wrap:anywhere}.pill{border-radius:99px;background:#28475a;padding:5px 10px;font-size:.8rem}progress{width:100%;height:15px;accent-color:#40c3a1}
+@media(max-width:800px){.grid{grid-template-columns:repeat(2,minmax(0,1fr))}}@media(max-width:520px){.grid{grid-template-columns:1fr 1fr;gap:10px}.metric{font-size:1.45rem}.card{padding:14px}header{padding:16px}main{padding:14px}.auth{margin:5vh auto}.actions button{flex:1}}
+</style></head><body>
+<header><h1>🛡 MediaGuardian</h1><button id="logout" class="secondary hide">Sign out</button></header>
+<main>
+<section id="login" class="card auth"><h2>Sign in</h2><p>Enter your MediaGuardian account credentials.</p>
+<form id="loginForm"><label for="username">Username</label><input id="username" name="username" required autocomplete="username">
+<label for="password">Password</label><input id="password" name="password" type="password" required autocomplete="current-password">
+<button type="submit" style="width:100%">Sign in</button></form><p id="loginError" class="alert" role="alert"></p></section>
+<div id="app" class="hide">
+<div class="actions"><span class="pill" id="state">Idle</span><button id="scan">Start scan</button><button id="refresh" class="secondary">Refresh</button></div>
+<p id="message" role="status"></p>
+<div class="grid">
+<section class="card"><div class="muted">Media files</div><div class="metric" id="files">—</div></section>
+<section class="card"><div class="muted">Library size</div><div class="metric" id="bytes">—</div></section>
+<section class="card"><div class="muted">Probed files</div><div class="metric" id="probed">—</div></section>
+<section class="card"><div class="muted">Issues</div><div class="metric" id="issueCount">—</div></section>
+</div>
+<section class="card"><h2>Scan activity</h2><div id="scanInfo">Not started</div><progress id="progress" max="100" value="0"></progress></section>
+<section class="card" style="margin-top:16px"><h2>Media folders</h2><div id="libraries" class="grid" style="margin:0"></div></section>
+<section class="card" style="margin-top:16px"><h2>Detected issues</h2><div id="issues">No issues loaded.</div></section>
+</div></main>
+<script>
+const $=id=>document.getElementById(id);let timer=null;
+async function api(path,options={}){
+ const r=await fetch(path,{credentials:'same-origin',...options,headers:{'Content-Type':'application/json',...(options.headers||{})}});
+ if(!r.ok){let message='HTTP '+r.status;try{message=(await r.json()).detail||message}catch{};const err=new Error(message);err.status=r.status;throw err}
+ return r.json();
+}
+function showLogin(){ $('login').classList.remove('hide');$('app').classList.add('hide');$('logout').classList.add('hide');if(timer)clearInterval(timer);timer=null }
+function showApp(){ $('login').classList.add('hide');$('app').classList.remove('hide');$('logout').classList.remove('hide');if(!timer)timer=setInterval(refresh,5000);refresh() }
+async function refresh(){
+ try{
+ const [data,issues,libraries]=await Promise.all([api('/api/status'),api('/api/issues'),api('/api/libraries')]);
+ $('files').textContent=data.total_files.toLocaleString();$('bytes').textContent=(data.bytes/1099511627776).toFixed(2)+' TiB';
+ $('probed').textContent=(data.statuses.ok||0).toLocaleString();
+ $('issueCount').textContent=issues.length.toLocaleString()+(issues.length===500?'+':'');
+ $('state').textContent=data.scan.running?'Scanning':'Idle';
+ $('scan').disabled=Boolean(data.scan.running);
+ $('scanInfo').textContent=(data.scan.running?'Scanning: ':'Last scan visited: ')+data.scan.scanned.toLocaleString()+' files'+(data.scan.last_error?' • '+data.scan.last_error:'');
+ $('progress').value=data.total_files?Math.min(100,(data.scan.scanned/data.total_files)*100):0;
+ const container=$('libraries');container.replaceChildren();
+ for(const lib of libraries){const card=document.createElement('div');card.className='card';const title=document.createElement('strong');title.textContent=lib.library;const desc=document.createElement('p');desc.textContent=lib.files.toLocaleString()+' files • '+(lib.bytes/1073741824).toFixed(1)+' GiB';card.append(title,desc);container.append(card)}
+ const list=$('issues');list.replaceChildren();
+ if(!issues.length)list.textContent='No reported file issues.';
+ for(const item of issues){const d=document.createElement('div');d.className='issue';d.textContent=item.status+' • '+item.path+(item.issue?' — '+item.issue:'');list.append(d)}
+ }catch(e){if(e.status===401)showLogin();else $('message').textContent=e.message}
+}
+$('loginForm').onsubmit=async e=>{e.preventDefault();$('loginError').textContent='';try{await api('/auth/login',{method:'POST',body:JSON.stringify({username:$('username').value,password:$('password').value})});$('password').value='';showApp()}catch(err){$('loginError').textContent=err.message}};
+$('scan').onclick=async()=>{try{await api('/api/scan',{method:'POST'});$('message').textContent='Scan started';refresh()}catch(e){$('message').textContent=e.status===409?'Scan already in progress.':e.message}};
+$('refresh').onclick=refresh;
+$('logout').onclick=async()=>{try{await api('/auth/logout',{method:'POST'})}finally{showLogin()}};
+api('/auth/me').then(showApp).catch(showLogin);
+</script></body></html>
