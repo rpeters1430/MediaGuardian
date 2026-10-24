@@ -243,3 +243,20 @@ def test_unreadable_files_are_reported(env):
         secret.chmod(0o644)
     assert found("unreadable") == ["Movies/Film A (2020)/Film A.mkv"]
     assert any(f[0] == "unreadable" for f in summary["new_findings"])
+
+
+def test_files_added_since_the_last_scan_are_not_reported_gone(env):
+    guardian.run_scan()
+    # Jellyfin and Radarr both list files that arrived after the scan.
+    write(env / "Movies/Gone (2001)/Gone.mkv")
+    write(env / "Movies/Film B (2021)/Film B.mkv")
+    guardian.run_crosscheck()
+    assert found("server_missing_file") == []
+    assert "Movies/Film B (2021)/Film B.mkv" not in found("arr_missing_file")
+
+
+def test_files_deleted_since_the_last_scan_are_not_reported_unseen(env):
+    guardian.run_scan()
+    (env / "TV/Stray/S01E01.mkv").unlink()
+    guardian.run_crosscheck()
+    assert "TV/Stray/S01E01.mkv" not in found("server_not_in_library")
