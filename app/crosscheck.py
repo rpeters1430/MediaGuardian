@@ -116,6 +116,12 @@ def under(path, folder):
     return folder == "" or path == folder or path.startswith(folder + "/")
 
 
+def gone(local, index):
+    """True when a file is neither in the last scan nor on disk now. Checking the disk catches
+    files added since the last scan, such as a fresh import or a new recording."""
+    return local not in index and not os.path.lexists(core.MEDIA / local)
+
+
 def ancestors(path):
     """'a/b/c.mkv' -> ['', 'a', 'a/b']"""
     parts = path.split("/")[:-1]
@@ -163,7 +169,7 @@ def check_arr(service, index):
         if radarr:
             file_path = (item.get("movieFile") or {}).get("path")
             local = to_local(file_path, roots) if file_path else None
-            if item.get("hasFile") and local and local not in index:
+            if item.get("hasFile") and local and gone(local, index):
                 findings.append(("arr_missing_file", local, 0, f"{service['name']} expects this file for {label}"))
         else:
             expected = (item.get("statistics") or {}).get("episodeFileCount") or 0
@@ -185,7 +191,7 @@ def check_arr(service, index):
             continue
         for episode_file in files:
             local = to_local(episode_file.get("path") or "", roots)
-            if local and local not in index:
+            if local and gone(local, index):
                 findings.append(("arr_missing_file", local, 0, f"{service['name']} expects this file for {label}"))
     untracked = {}
     for root in roots.values():
@@ -252,11 +258,15 @@ def check_server(service, index, now):
         if local is None:
             continue
         known.add(local)
-        if local not in index:
+        if gone(local, index):
             findings.append(("server_missing_file", local, 0, f"{service['name']} still lists this file"))
     for root in roots.values():
         for path, (mtime_ns, size) in index.items():
-            if under(path, root) and path not in known and not is_extra(path) and now - mtime_ns / 1e9 > NEW_FILE_GRACE_SECONDS:
+            if (
+                under(path, root) and path not in known and not is_extra(path)
+                and now - mtime_ns / 1e9 > NEW_FILE_GRACE_SECONDS
+                and os.path.lexists(core.MEDIA / path)  # not deleted since the last scan
+            ):
                 findings.append((
                     "server_not_in_library", path, size,
                     f"In a {service['name']} library folder but not in {service['name']}. Check the "
