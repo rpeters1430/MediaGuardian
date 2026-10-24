@@ -42,6 +42,31 @@ def config_source():
     return "MG_SERVICES" if os.getenv("MG_SERVICES", "").strip() else str(services_file())
 
 
+def parse_config(text):
+    """Validate an app list (JSON text). Raises ValueError with a message meant for people."""
+    raw = json.loads(text)
+    if not isinstance(raw, list):
+        raise ValueError(f"{config_source()} must contain a list of services")
+    config = []
+    for item in raw:
+        if not isinstance(item, dict):
+            raise ValueError("Each service must be an object with a name, type and url")
+        name, url = str(item.get("name", "")).strip(), str(item.get("url", "")).strip().rstrip("/")
+        kind = str(item.get("type", "generic")).lower()
+        if not name or not url.startswith(("http://", "https://")):
+            raise ValueError(f"{name or 'Each app'} needs a URL starting with http:// or https://")
+        if kind not in TYPES:
+            raise ValueError(f"Unknown type {kind!r} for {name}; use one of {', '.join(TYPES)}")
+        path_map = item.get("path_map") or {}
+        if not isinstance(path_map, dict) or not all(isinstance(v, str) for v in path_map.values()):
+            raise ValueError(f"path_map for {name} must map app paths to media folders, e.g. {{\"/data/media\": \"\"}}")
+        config.append({
+            "name": name, "url": url, "type": kind, "api_key": item.get("api_key") or "",
+            "path_map": {str(k).rstrip("/") or "/": v.strip("/") for k, v in path_map.items()},
+        })
+    return config
+
+
 def load_config():
     inline = os.getenv("MG_SERVICES", "").strip()
     if inline:
@@ -57,24 +82,7 @@ def load_config():
         return STATE["config"]
     mtime = version
     try:
-        raw = json.loads(inline or path.read_text())
-        if not isinstance(raw, list):
-            raise ValueError(f"{config_source()} must contain a list of services")
-        config = []
-        for item in raw:
-            name, url = str(item.get("name", "")).strip(), str(item.get("url", "")).strip().rstrip("/")
-            kind = str(item.get("type", "generic")).lower()
-            if not name or not url.startswith(("http://", "https://")):
-                raise ValueError(f"Each service needs a name and an http(s) url: {item!r:.80}")
-            if kind not in TYPES:
-                raise ValueError(f"Unknown type {kind!r} for {name}; use one of {', '.join(TYPES)}")
-            path_map = item.get("path_map") or {}
-            if not isinstance(path_map, dict) or not all(isinstance(v, str) for v in path_map.values()):
-                raise ValueError(f"path_map for {name} must map app paths to media folders, e.g. {{\"/data/media\": \"\"}}")
-            config.append({
-                "name": name, "url": url, "type": kind, "api_key": item.get("api_key") or "",
-                "path_map": {str(k).rstrip("/") or "/": v.strip("/") for k, v in path_map.items()},
-            })
+        config = parse_config(inline or path.read_text())
         STATE.update(config=config, config_error=None, config_mtime=mtime)
     except (OSError, ValueError, AttributeError) as exc:
         STATE.update(config_error=str(exc)[:300], config_mtime=mtime)

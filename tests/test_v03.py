@@ -196,7 +196,7 @@ def test_stack_config_and_transitions(media, monkeypatch):
 def test_stack_rejects_bad_config(media):
     (core.BASE / "services.json").write_text('[{"name":"X","url":"ftp://x","type":"sonarr"}]')
     stack.load_config()
-    assert "http(s) url" in stack.snapshot()["config_error"]
+    assert "http:// or https://" in stack.snapshot()["config_error"]
 
 
 def test_services_from_environment_override_the_file(media, monkeypatch):

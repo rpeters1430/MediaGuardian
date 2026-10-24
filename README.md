@@ -31,8 +31,26 @@ Pull requests run tests and build checks. A tag `v0.1.0` triggers GHCR publishin
 - **v0.3:** scheduled scans, scan history, mass-disappearance guard, alerts with ntfy/Discord notifications, media stack status
 - **v0.4:** hardlink and orphan reports, Shrinkarr leftover audit, disk capacity forecast
 - **v0.5:** Jellyfin/Emby/Plex and Sonarr/Radarr cross-checks (library vs disk), stuck imports, permission checks
-- **v0.6 (this release):** playback flags (audio/subtitle languages, codecs), Shrinkarr re-encode estimates, muting findings
+- **v0.6:** playback flags (audio/subtitle languages, codecs), Shrinkarr re-encode estimates, muting findings
+- **v0.7 (this release):** Settings screen on the dashboard for every setting and your app list
 - **Later:** approval-based repair suggestions with a full audit trail. Repairs run in Shrinkarr or the *arr apps; MediaGuardian stays read-only.
+
+
+## v0.7 upgrade: Settings screen
+
+Choose **Settings** at the top of the dashboard to change everything that used to need `compose.yaml`, `.env` or `services.json` edits. Changes take effect right away, with no container restart.
+
+- **Apps:** add, edit or remove apps. **Test** checks that the app answers and its API key is accepted. It also shows where each of its library folders is found on the media share and suggests a path-map line for any that aren't. Saving writes `services.json`, so an existing file keeps working and shows up here. API keys are never sent back to the browser; leave the field blank to keep the saved key.
+- **Notifications:** ntfy URL and token, Discord webhook, and **Send test notification**.
+- **Scanning, Alerts, Downloads, App checks, Playback:** every setting described below, with its limits checked when you save.
+
+Each setting shows where its value comes from: **Saved here**, **From compose / .env**, or **Default**. A value saved here wins over the environment, and **Reset** goes back to the compose/.env value or the default. So an existing `compose.yaml` that sets these variables keeps working, and you can trim it down to the new, shorter `compose.yaml` whenever you like.
+
+A few things stay in `compose.yaml` and `.env` because Docker needs them before the app starts: folder mounts (a download folder still needs its read-only mount line), the port and bind IP, the container user, `TZ`, and the login. If `MG_SERVICES` is set in `compose.yaml`, the app list is read from there and can't be edited on the Settings screen.
+
+Settings are stored in `/volume1/docker/mediaguardian/settings.json`. That file and `services.json` are written readable only by the container user, because they can hold API keys and notification tokens.
+
+New endpoints: `GET/POST /api/settings`, `PUT /api/settings/services`, `POST /api/settings/test-service` and `POST /api/settings/test-notification`.
 
 
 ## v0.6 upgrade: playback checks and muting

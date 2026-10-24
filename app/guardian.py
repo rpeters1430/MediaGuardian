@@ -17,10 +17,14 @@ def parse_window(text):
     """'1-7' means scheduled scans may start from 01:00 up to 06:59 local time."""
     if not text:
         return None
+    message = "must look like 1-7: a start hour and an end hour, 0 to 24"
     start, _, end = text.partition("-")
-    start, end = int(start), int(end)
+    try:
+        start, end = int(start), int(end)
+    except ValueError:
+        raise ValueError(message) from None
     if not (0 <= start <= 23 and 0 <= end <= 24) or start == end:
-        raise ValueError("MG_SCAN_WINDOW must look like 1-7 (start hour-end hour)")
+        raise ValueError(message)
     return start, end
 
 

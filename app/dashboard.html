@@ -6,13 +6,13 @@
 *{box-sizing:border-box}body{margin:0}header{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:20px max(20px,calc((100vw - 1120px)/2));border-bottom:1px solid #25354b;background:#101b2b}h1{margin:0;font-size:1.4rem}
 main{max-width:1120px;margin:auto;padding:22px}h2{font-size:1.08rem;margin:0 0 14px}p{color:#aebdd1}
 .grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:16px;margin:18px 0}.card{background:#17253a;border:1px solid #2b4058;border-radius:16px;padding:20px;min-width:0}.metric{font-size:2rem;font-weight:750;word-break:break-word}.muted{color:#a8bad0;font-size:.9rem}
-button,input{font:inherit;border-radius:10px;padding:12px 14px;border:1px solid #435974}button{background:#256b9e;color:white;border-color:#3487c0;cursor:pointer}button:disabled{opacity:.5;cursor:default}button.secondary{background:#1a2b41}input{background:#0e1a29;color:white;width:100%;margin:8px 0 14px}
+button,input{font:inherit;border-radius:10px;padding:12px 14px;border:1px solid #435974}button{background:#256b9e;color:white;border-color:#3487c0;cursor:pointer}button:disabled{opacity:.5;cursor:default}button.secondary{background:#1a2b41}input,select,textarea{background:#0e1a29;color:white;width:100%;margin:8px 0 14px;font:inherit;border-radius:10px;padding:12px 14px;border:1px solid #435974}textarea{min-height:70px;resize:vertical}.field{margin-bottom:6px}.field label{font-weight:600}.field .help{margin:-6px 0 12px;font-size:.85rem}.field .row{display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap}.small{font-size:.75rem;padding:3px 8px}.appform{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:0 14px}.appform .wide{grid-column:1/-1}.ok{color:#6fe0b1}.bad{color:#ff8f8f}@media(max-width:620px){.appform{grid-template-columns:1fr}}
 .actions{display:flex;gap:10px;align-items:center;flex-wrap:wrap}.hide{display:none!important}.auth{max-width:430px;margin:10vh auto}.alert{color:#ffbdbd;min-height:24px}.good{color:#6fe0b1}.issue{padding:12px 0;border-bottom:1px solid #31425a;overflow-wrap:anywhere}.pill{border-radius:99px;background:#28475a;padding:5px 10px;font-size:.8rem}progress{width:100%;height:15px;accent-color:#40c3a1}
 .dot{display:inline-block;width:10px;height:10px;border-radius:50%;margin-right:8px;background:#7d8ea5}.dot.up{background:#40c3a1}.dot.unstable{background:#f0c05a}.dot.down{background:#ff6b6b}.warn{color:#f0c05a;font-size:.9rem;margin:6px 0 0;overflow-wrap:break-word}.event{padding:10px 0;border-bottom:1px solid #31425a;overflow-wrap:anywhere}.event .lvl{font-weight:700;margin-right:6px}.lvl.critical{color:#ff6b6b}.lvl.warning{color:#f0c05a}.lvl.info{color:#8fb8e0}.scroll{overflow-x:auto}table{border-collapse:collapse;width:100%;font-size:.9rem}th,td{text-align:left;padding:8px 10px;border-bottom:1px solid #31425a;white-space:nowrap}th{color:#a8bad0;font-weight:600}.head{display:flex;justify-content:space-between;align-items:center;gap:10px;margin-bottom:14px}.head h2{margin:0}.svc{min-width:0}.svc strong{overflow-wrap:anywhere}details{border-bottom:1px solid #31425a;padding:10px 0}summary{cursor:pointer;display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap}summary span{color:#a8bad0}.finding{padding:8px 0 8px 14px;border-left:2px solid #31425a;margin:8px 0;overflow-wrap:anywhere}.finding p{margin:4px 0 0;font-size:.88rem}.mini{padding:5px 10px;font-size:.8rem;margin:6px 6px 0 0}
 code{background:#0e1a29;padding:2px 6px;border-radius:6px;overflow-wrap:anywhere}
 @media(max-width:800px){.grid{grid-template-columns:repeat(2,minmax(0,1fr))}}@media(max-width:520px){.grid{grid-template-columns:1fr 1fr;gap:10px}.metric{font-size:1.45rem}.card{padding:14px}header{padding:16px}main{padding:14px}.auth{margin:5vh auto}.actions button{flex:1}}
 </style></head><body>
-<header><h1>🛡 MediaGuardian</h1><button id="logout" class="secondary hide">Sign out</button></header>
+<header><h1>🛡 MediaGuardian</h1><div class="actions"><button id="settingsBtn" class="secondary hide">Settings</button><button id="logout" class="secondary hide">Sign out</button></div></header>
 <main>
 <section id="login" class="card auth"><h2>Sign in</h2><p>Enter your MediaGuardian account credentials.</p>
 <form id="loginForm"><label for="username">Username</label><input id="username" name="username" required autocomplete="username">
@@ -38,16 +38,26 @@ code{background:#0e1a29;padding:2px 6px;border-radius:6px;overflow-wrap:anywhere
 <section class="card" style="margin-top:16px"><h2>Recent scans</h2><div class="scroll"><table><thead><tr><th>Finished</th><th>Trigger</th><th>Files</th><th>New</th><th>Changed</th><th>Missing</th><th>Issues</th><th>Read errors</th></tr></thead><tbody id="scans"></tbody></table></div></section>
 <section class="card" style="margin-top:16px"><h2>Media folders</h2><div id="libraries" class="grid" style="margin:0"></div></section>
 <section class="card" style="margin-top:16px"><h2>Detected issues</h2><div id="issues">No issues loaded.</div></section>
+</div>
+<div id="settingsView" class="hide">
+<div class="actions"><button id="closeSettings" class="secondary">← Back to dashboard</button></div>
+<p>Settings saved here take effect right away and override compose.yaml and .env. Folder mounts, the port, the container user and the login stay in compose.yaml and .env.</p>
+<p id="settingsMsg" role="status"></p>
+<section class="card"><div class="head"><h2>Apps</h2><button id="addApp" class="secondary">Add app</button></div>
+<p class="muted">Each app is checked for uptime. With an API key, Sonarr, Radarr, Jellyfin, Emby and Plex are also compared with what's on disk. Use the NAS's LAN IP, not localhost.</p>
+<div id="appsList"></div><div class="actions"><button id="saveApps">Save apps</button><span id="appsMsg" role="status"></span></div></section>
+<div id="settingsGroups"></div>
+<div class="actions" style="margin-top:16px"><button id="saveSettings">Save settings</button><span id="saveMsg" role="status"></span></div>
 </div></main>
 <script>
 const $=id=>document.getElementById(id);let timer=null;
 async function api(path,options={}){
  const r=await fetch(path,{credentials:'same-origin',...options,headers:{'Content-Type':'application/json',...(options.headers||{})}});
- if(!r.ok){let message='HTTP '+r.status;try{message=(await r.json()).detail||message}catch{};const err=new Error(message);err.status=r.status;throw err}
+ if(!r.ok){let message='HTTP '+r.status,detail=null;try{detail=(await r.json()).detail;if(typeof detail==='string')message=detail}catch{};const err=new Error(message);err.status=r.status;err.detail=detail;throw err}
  return r.json();
 }
-function showLogin(){ $('login').classList.remove('hide');$('app').classList.add('hide');$('logout').classList.add('hide');if(timer)clearInterval(timer);timer=null }
-function showApp(){ $('login').classList.add('hide');$('app').classList.remove('hide');$('logout').classList.remove('hide');if(!timer)timer=setInterval(refresh,5000);refresh() }
+function showLogin(){ $('login').classList.remove('hide');$('app').classList.add('hide');$('settingsView').classList.add('hide');$('settingsBtn').classList.add('hide');$('logout').classList.add('hide');if(timer)clearInterval(timer);timer=null }
+function showApp(){ $('login').classList.add('hide');$('app').classList.remove('hide');$('settingsBtn').classList.remove('hide');$('logout').classList.remove('hide');if(!timer)timer=setInterval(refresh,5000);refresh() }
 const when=t=>t?new Date(t*1000).toLocaleString([], {month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'}):'—';
 function el(tag,cls,text){const e=document.createElement(tag);if(cls)e.className=cls;if(text!==undefined)e.textContent=text;return e}
 function renderStack(stack){
@@ -158,6 +168,94 @@ $('scan').onclick=async()=>{try{await api('/api/scan',{method:'POST'});$('messag
 $('refresh').onclick=refresh;
 $('crosscheck').onclick=async()=>{try{await api('/api/consistency/run',{method:'POST'});$('message').textContent='Checking your apps…';setTimeout(refresh,3000)}catch(e){$('message').textContent=e.status===409?'A check is already running.':e.message}};
 $('ack').onclick=async()=>{try{await api('/api/events/ack',{method:'POST'});refresh()}catch(e){$('message').textContent=e.message}};
+// --- Settings -----------------------------------------------------------
+const GROUPS=['Notifications','Scanning','Alerts','Downloads','Apps','Playback'];
+const SOURCES={saved:'Saved here',environment:'From compose / .env',default:'Default'};
+let settingsData=null;
+function errorText(e){const d=e.detail;return typeof d==='string'?d:e.message}
+async function openSettings(){$('app').classList.add('hide');$('settingsBtn').classList.add('hide');$('settingsView').classList.remove('hide');window.scrollTo(0,0);await loadSettings()}
+function closeSettings(){$('settingsView').classList.add('hide');$('app').classList.remove('hide');$('settingsBtn').classList.remove('hide');refresh()}
+async function loadSettings(){try{settingsData=await api('/api/settings');renderApps();renderSettings()}catch(e){$('settingsMsg').textContent=e.message}}
+function parseMap(text){const map={};for(const line of text.split('\n')){if(!line.trim())continue;const i=line.indexOf('=');if(i<0)throw new Error('Path map lines look like: /data/media = Movies');map[line.slice(0,i).trim()]=line.slice(i+1).trim()}return map}
+function appRow(svc){
+ const card=el('div','card');card.style.marginBottom='12px';card.dataset.keep=svc.name||'';
+ const form=el('div','appform');
+ const field=(label,input,wide)=>{const w=el('div',wide?'wide':null);const id='f'+Math.random().toString(36).slice(2);input.id=id;const l=el('label',null,label);l.htmlFor=id;w.append(l,input);form.append(w);return input};
+ const name=field('Name',el('input'));name.value=svc.name||'';name.dataset.k='name';
+ const type=field('Type',el('select'));for(const t of settingsData.service_types){const o=el('option',null,t);o.value=t;type.append(o)}type.value=svc.type||'generic';type.dataset.k='type';
+ const url=field('URL',el('input'),true);url.value=svc.url||'';url.placeholder='http://192.168.1.10:8989';url.dataset.k='url';
+ const key=field('API key or token',el('input'),true);key.type='password';key.autocomplete='off';key.dataset.k='api_key';key.placeholder=svc.has_key?'Saved. Leave blank to keep it':'Optional. Needed for health warnings and library checks';
+ const map=field('Path map (optional)',el('textarea'),true);map.dataset.k='path_map';map.placeholder='/data/media = \n(only if Test says a folder isn\'t found: app path = folder in your media share)';
+ map.value=Object.entries(svc.path_map||{}).map(([a,b])=>a+' = '+b).join('\n');
+ const result=el('div','muted');const buttons=el('div','actions');
+ const test=el('button','secondary mini','Test');const remove=el('button','secondary mini','Remove');
+ test.onclick=()=>testApp(card,result);remove.onclick=()=>card.remove();buttons.append(test,remove);
+ card.append(form,buttons,result);return card;
+}
+function readApp(card){
+ const get=k=>card.querySelector('[data-k="'+k+'"]').value;
+ const item={name:get('name').trim(),type:get('type'),url:get('url').trim(),path_map:parseMap(get('path_map')),keep_key_from:card.dataset.keep};
+ if(get('api_key'))item.api_key=get('api_key');return item;
+}
+async function testApp(card,box){
+ box.replaceChildren(el('p',null,'Testing…'));
+ try{const r=await api('/api/settings/test-service',{method:'POST',body:JSON.stringify({service:readApp(card)})});box.replaceChildren();
+  box.append(el('p',r.up?'ok':'bad',r.up?'✓ Responding'+(r.code?' (HTTP '+r.code+')':'')+' in '+r.ms+' ms':'✗ Not responding: '+(r.error||'no answer')));
+  for(const w of r.warnings)box.append(el('p','warn','⚠ '+w));
+  if(r.key_checked)box.append(el('p',r.key_error?'bad':'ok',r.key_error?'✗ '+r.key_error:'✓ API key accepted'));
+  for(const f of r.folders){box.append(el('p',f.local===null?'bad':'ok',f.local===null?'✗ '+f.remote+' isn\'t on the media share. Add a path map line: '+f.remote+' = <folder in your share>':'✓ '+f.remote+' → '+(f.local||'(media share root)')))}
+ }catch(e){box.replaceChildren(el('p','bad',errorText(e)))}
+}
+function renderApps(){
+ const list=$('appsList');list.replaceChildren();
+ const editable=settingsData.services_editable;
+ for(const svc of settingsData.services)list.append(appRow(svc));
+ if(!settingsData.services.length&&editable)list.append(el('p','muted','No apps yet. Choose Add app.'));
+ $('addApp').disabled=$('saveApps').disabled=!editable;
+ if(!editable)list.prepend(el('p','warn','Apps are set by MG_SERVICES in compose.yaml. Remove MG_SERVICES there to edit them here.'));
+}
+function renderSettings(){
+ const box=$('settingsGroups');box.replaceChildren();
+ for(const group of GROUPS){
+  const items=settingsData.settings.filter(s=>s.group===group);if(!items.length)continue;
+  const card=el('section','card');card.style.marginTop='16px';card.append(el('h2',null,group==='Apps'?'App checks':group));
+  for(const s of items){
+   const f=el('div','field');const row=el('div','row');const label=el('label',null,s.label);label.htmlFor='set-'+s.key;
+   const meta=el('span');meta.append(el('span','pill small',SOURCES[s.source]));
+   if(s.source==='saved'){const r=el('button','secondary mini','Reset');r.title='Go back to the compose/.env value or the default';r.onclick=()=>saveSettings({[s.key]:null});meta.append(' ',r)}
+   row.append(label,meta);
+   const input=el('input');input.id='set-'+s.key;input.dataset.key=s.key;
+   if(s.kind==='int'||s.kind==='float'){input.type='number';input.min=s.min;input.max=s.max;input.step=s.kind==='int'?'1':'any'}
+   if(s.kind==='secret'||s.kind==='secret_url'){input.type='password';input.autocomplete='off';input.placeholder=s.is_set?'Saved. Leave blank to keep it':''}
+   else input.value=s.value;
+   input.dataset.original=input.value;
+   f.append(row,input);if(s.help)f.append(el('p','muted help',s.help));
+   f.append(el('p','alert help'));f.lastChild.id='err-'+s.key;card.append(f);
+  }
+  if(group==='Notifications'){const t=el('button','secondary','Send test notification');const out=el('span','muted');
+   t.onclick=async()=>{out.textContent=' Sending…';try{const r=await api('/api/settings/test-notification',{method:'POST'});out.textContent=r.sent?' ✓ Sent. Check your phone or Discord.':' ✗ '+r.error}catch(e){out.textContent=' '+errorText(e)}};
+   const a=el('div','actions');a.append(t,out);card.append(a);card.append(el('p','muted help','Save first; the test uses the saved values.'))}
+  box.append(card);
+ }
+}
+async function saveSettings(changes){
+ for(const p of document.querySelectorAll('[id^="err-"]'))p.textContent='';
+ if(!changes){changes={};for(const input of document.querySelectorAll('#settingsGroups input')){
+  const s=settingsData.settings.find(x=>x.key===input.dataset.key);
+  if(s.kind==='secret'||s.kind==='secret_url'){if(input.value)changes[s.key]=input.value}
+  else if(input.value!==input.dataset.original)changes[s.key]=input.type==='number'&&input.value!==''?Number(input.value):input.value}}
+ if(!Object.keys(changes).length){$('saveMsg').textContent=' Nothing changed.';return}
+ try{const r=await api('/api/settings',{method:'POST',body:JSON.stringify({changes})});settingsData.settings=r.settings;renderSettings();$('saveMsg').textContent=' ✓ Saved';$('settingsMsg').textContent=''}
+ catch(e){const errs=(e.detail&&e.detail.errors)||{};for(const[k,v]of Object.entries(errs)){const p=$('err-'+k);if(p)p.textContent=v}$('saveMsg').textContent=' Not saved: fix the highlighted settings.'}
+}
+async function saveApps(){
+ let services;try{services=[...$('appsList').querySelectorAll('.card')].map(readApp)}catch(e){$('appsMsg').textContent=' '+e.message;return}
+ try{const r=await api('/api/settings/services',{method:'PUT',body:JSON.stringify({services})});settingsData.services=r.services;renderApps();$('appsMsg').textContent=' ✓ Saved. Checks start within a minute.'}
+ catch(e){$('appsMsg').textContent=' '+errorText(e)}
+}
+$('settingsBtn').onclick=openSettings;$('closeSettings').onclick=closeSettings;
+$('saveSettings').onclick=()=>saveSettings();$('saveApps').onclick=saveApps;
+$('addApp').onclick=()=>{const list=$('appsList');const empty=list.querySelector('p.muted');if(empty)empty.remove();const row=appRow({type:'sonarr'});list.append(row);row.querySelector('input').focus()};
 $('logout').onclick=async()=>{try{await api('/auth/logout',{method:'POST'})}finally{showLogin()}};
 api('/auth/me').then(showApp).catch(showLogin);
 </script></body></html>
