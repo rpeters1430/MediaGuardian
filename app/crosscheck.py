@@ -319,3 +319,36 @@ def snapshot():
         ],
         "summary": summary(),
     }
+
+
+def library_roots(service):
+    """The library or root folders an app reports, as the app sees them (a cheap call)."""
+    base, token = service["url"], service["api_key"]
+    if service["type"] in ARR_TYPES:
+        return [r["path"] for r in fetch_json(f"{base}/api/v3/rootfolder", {"X-Api-Key": token})]
+    if service["type"] == "plex":
+        sections = fetch_json(f"{base}/library/sections", {"X-Plex-Token": token})["MediaContainer"].get("Directory", [])
+        return [loc["path"] for s in sections if s.get("type") in ("movie", "show") for loc in s.get("Location", [])]
+    prefix = "/emby" if service["type"] == "emby" else ""
+    folders = fetch_json(f"{base}{prefix}/Library/VirtualFolders", {"X-Emby-Token": token})
+    return [
+        loc for folder in folders
+        if (folder.get("CollectionType") or "mixed") in ("movies", "tvshows", "mixed", "homevideos")
+        for loc in folder.get("Locations", [])
+    ]
+
+
+def test_service(service):
+    """Check an app the way the dashboard's Test button needs: reachable, key accepted, folders mapped."""
+    result = stack.check(service)
+    out = {"up": result["up"], "code": result["code"], "ms": result["ms"], "error": result["error"],
+           "warnings": result["warnings"], "key_checked": False, "key_error": None, "folders": []}
+    if not result["up"] or not service["api_key"] or service["type"] not in ARR_TYPES | SERVER_TYPES:
+        return out
+    out["key_checked"] = True
+    try:
+        for remote in library_roots(service):
+            out["folders"].append({"remote": remote, "local": map_root(remote, service["path_map"])})
+    except Exception as exc:  # report the failure to the person testing, whatever it is
+        out["key_error"] = describe_error(exc)
+    return out

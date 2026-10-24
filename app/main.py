@@ -1,3 +1,4 @@
+import json
 import os
 import sqlite3
 import threading
@@ -8,7 +9,19 @@ from fastapi import Depends, FastAPI, HTTPException, Request, Response
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
-from . import auth, cleanup, core, crosscheck, events, guardian, playback, stack
+from . import auth, cleanup, core, crosscheck, events, guardian, playback, settings, stack
+
+
+class SettingsBody(BaseModel):
+    changes: dict[str, int | float | str | None]
+
+
+class ServicesBody(BaseModel):
+    services: list[dict]
+
+
+class TestServiceBody(BaseModel):
+    service: dict
 
 
 class MuteBody(BaseModel):
@@ -28,6 +41,7 @@ class LoginBody(BaseModel):
 async def lifespan(app):
     auth.validate_config()
     core.init_db()
+    settings.apply()
     stop = threading.Event()
     if os.getenv("MG_BACKGROUND", "1") != "0":
         guardian.start_background(stop)
@@ -36,7 +50,7 @@ async def lifespan(app):
 
 
 app = FastAPI(
-    title="MediaGuardian", version="0.6.0", lifespan=lifespan,
+    title="MediaGuardian", version="0.7.0", lifespan=lifespan,
     docs_url=None, redoc_url=None, openapi_url=None,
 )
 
@@ -174,6 +188,57 @@ def unmute(body: MuteBody, request: Request, user: str = Depends(auth.check_sess
     auth.same_origin(request)
     cleanup.unmute(body.kind, body.path)
     return {"muted": False}
+
+
+@app.get("/api/settings")
+def get_settings(user: str = Depends(auth.check_session)):
+    return {
+        "settings": settings.describe(),
+        "services": settings.list_services(),
+        "services_editable": settings.services_editable(),
+        "service_types": list(stack.TYPES),
+    }
+
+
+@app.post("/api/settings")
+def save_settings(body: SettingsBody, request: Request, user: str = Depends(auth.check_session)):
+    auth.same_origin(request)
+    errors = settings.save(body.changes)
+    if errors:
+        raise HTTPException(400, {"errors": errors})
+    return {"settings": settings.describe()}
+
+
+@app.put("/api/settings/services")
+def save_services(body: ServicesBody, request: Request, user: str = Depends(auth.check_session)):
+    auth.same_origin(request)
+    try:
+        return {"services": settings.save_services(body.services)}
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from None
+
+
+@app.post("/api/settings/test-service")
+def test_service(body: TestServiceBody, request: Request, user: str = Depends(auth.check_session)):
+    auth.same_origin(request)
+    item = dict(body.service)
+    if not item.get("api_key"):
+        saved = {s["name"]: s for s in stack.load_config()}
+        item["api_key"] = saved.get(item.get("keep_key_from") or item.get("name"), {}).get("api_key", "")
+    try:
+        service = stack.parse_config(json.dumps([item]))[0]
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from None
+    return crosscheck.test_service(service)
+
+
+@app.post("/api/settings/test-notification")
+def test_notification(request: Request, user: str = Depends(auth.check_session)):
+    auth.same_origin(request)
+    if not (events.NTFY_URL or events.DISCORD_WEBHOOK):
+        raise HTTPException(400, "Set an ntfy URL or Discord webhook first")
+    events.send_notification("info", "Test notification from MediaGuardian. Alerts will arrive like this.")
+    return {"sent": events.LAST_NOTIFY_ERROR["error"] is None, "error": events.LAST_NOTIFY_ERROR["error"]}
 
 
 @app.get("/api/consistency")
