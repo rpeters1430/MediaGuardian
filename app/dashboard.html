@@ -8,7 +8,7 @@ main{max-width:1120px;margin:auto;padding:22px}h2{font-size:1.08rem;margin:0 0 1
 .grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:16px;margin:18px 0}.card{background:#17253a;border:1px solid #2b4058;border-radius:16px;padding:20px;min-width:0}.metric{font-size:2rem;font-weight:750;word-break:break-word}.muted{color:#a8bad0;font-size:.9rem}
 button,input{font:inherit;border-radius:10px;padding:12px 14px;border:1px solid #435974}button{background:#256b9e;color:white;border-color:#3487c0;cursor:pointer}button:disabled{opacity:.5;cursor:default}button.secondary{background:#1a2b41}input{background:#0e1a29;color:white;width:100%;margin:8px 0 14px}
 .actions{display:flex;gap:10px;align-items:center;flex-wrap:wrap}.hide{display:none!important}.auth{max-width:430px;margin:10vh auto}.alert{color:#ffbdbd;min-height:24px}.good{color:#6fe0b1}.issue{padding:12px 0;border-bottom:1px solid #31425a;overflow-wrap:anywhere}.pill{border-radius:99px;background:#28475a;padding:5px 10px;font-size:.8rem}progress{width:100%;height:15px;accent-color:#40c3a1}
-.dot{display:inline-block;width:10px;height:10px;border-radius:50%;margin-right:8px;background:#7d8ea5}.dot.up{background:#40c3a1}.dot.unstable{background:#f0c05a}.dot.down{background:#ff6b6b}.warn{color:#f0c05a;font-size:.9rem;margin:6px 0 0;overflow-wrap:break-word}.event{padding:10px 0;border-bottom:1px solid #31425a;overflow-wrap:anywhere}.event .lvl{font-weight:700;margin-right:6px}.lvl.critical{color:#ff6b6b}.lvl.warning{color:#f0c05a}.lvl.info{color:#8fb8e0}.scroll{overflow-x:auto}table{border-collapse:collapse;width:100%;font-size:.9rem}th,td{text-align:left;padding:8px 10px;border-bottom:1px solid #31425a;white-space:nowrap}th{color:#a8bad0;font-weight:600}.head{display:flex;justify-content:space-between;align-items:center;gap:10px;margin-bottom:14px}.head h2{margin:0}.svc{min-width:0}.svc strong{overflow-wrap:anywhere}details{border-bottom:1px solid #31425a;padding:10px 0}summary{cursor:pointer;display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap}summary span{color:#a8bad0}.finding{padding:8px 0 8px 14px;border-left:2px solid #31425a;margin:8px 0;overflow-wrap:anywhere}.finding p{margin:4px 0 0;font-size:.88rem}
+.dot{display:inline-block;width:10px;height:10px;border-radius:50%;margin-right:8px;background:#7d8ea5}.dot.up{background:#40c3a1}.dot.unstable{background:#f0c05a}.dot.down{background:#ff6b6b}.warn{color:#f0c05a;font-size:.9rem;margin:6px 0 0;overflow-wrap:break-word}.event{padding:10px 0;border-bottom:1px solid #31425a;overflow-wrap:anywhere}.event .lvl{font-weight:700;margin-right:6px}.lvl.critical{color:#ff6b6b}.lvl.warning{color:#f0c05a}.lvl.info{color:#8fb8e0}.scroll{overflow-x:auto}table{border-collapse:collapse;width:100%;font-size:.9rem}th,td{text-align:left;padding:8px 10px;border-bottom:1px solid #31425a;white-space:nowrap}th{color:#a8bad0;font-weight:600}.head{display:flex;justify-content:space-between;align-items:center;gap:10px;margin-bottom:14px}.head h2{margin:0}.svc{min-width:0}.svc strong{overflow-wrap:anywhere}details{border-bottom:1px solid #31425a;padding:10px 0}summary{cursor:pointer;display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap}summary span{color:#a8bad0}.finding{padding:8px 0 8px 14px;border-left:2px solid #31425a;margin:8px 0;overflow-wrap:anywhere}.finding p{margin:4px 0 0;font-size:.88rem}.mini{padding:5px 10px;font-size:.8rem;margin:6px 6px 0 0}
 code{background:#0e1a29;padding:2px 6px;border-radius:6px;overflow-wrap:anywhere}
 @media(max-width:800px){.grid{grid-template-columns:repeat(2,minmax(0,1fr))}}@media(max-width:520px){.grid{grid-template-columns:1fr 1fr;gap:10px}.metric{font-size:1.45rem}.card{padding:14px}header{padding:16px}main{padding:14px}.auth{margin:5vh auto}.actions button{flex:1}}
 </style></head><body>
@@ -32,6 +32,8 @@ code{background:#0e1a29;padding:2px 6px;border-radius:6px;overflow-wrap:anywhere
 </div>
 <section class="card"><h2>Space</h2><div id="capacity" class="grid" style="margin:0"></div><p id="dlNote" class="muted"></p></section>
 <section class="card" style="margin-top:16px"><div class="head"><h2>Cleanup</h2><span class="muted" id="reclaim"></span></div><p class="muted">MediaGuardian only reports these. Delete or fix them yourself, or in Sonarr, Radarr or your download client.</p><div id="cleanup"></div></section>
+<section class="card" style="margin-top:16px"><div class="head"><h2>Playback</h2><span class="muted" id="savings"></span></div><p class="muted" id="playbackNote">Files that may not play smoothly on every device, and files that would shrink a lot if Shrinkarr re-encoded them.</p><div id="playback"></div></section>
+<section class="card hide" id="mutedCard" style="margin-top:16px"><h2>Muted</h2><p class="muted">These findings are hidden and don't raise alerts. A muted folder covers everything inside it.</p><div id="mutedList"></div></section>
 <section class="card" style="margin-top:16px"><h2>Scan activity</h2><div id="scanInfo">Not started</div><progress id="progress" max="100" value="0"></progress></section>
 <section class="card" style="margin-top:16px"><h2>Recent scans</h2><div class="scroll"><table><thead><tr><th>Finished</th><th>Trigger</th><th>Files</th><th>New</th><th>Changed</th><th>Missing</th><th>Issues</th><th>Read errors</th></tr></thead><tbody id="scans"></tbody></table></div></section>
 <section class="card" style="margin-top:16px"><h2>Media folders</h2><div id="libraries" class="grid" style="margin:0"></div></section>
@@ -71,6 +73,21 @@ function renderScans(list){
   for(const v of [when(s.finished_at),s.trigger,s.seen.toLocaleString()+(s.complete?'':' (partial)'),s.new_files+s.restored,s.changed,missing,s.new_issues,s.errors])tr.append(el('td',null,String(v)));body.append(tr)}
 }
 const bytes=n=>{const u=['B','KiB','MiB','GiB','TiB'];let i=0;while(n>=1024&&i<u.length-1){n/=1024;i++}return (i?n.toFixed(1):n)+' '+u[i]};
+async function muteFinding(kind,path,undo){
+ try{await api(undo?'/api/findings/unmute':'/api/findings/mute',{method:'POST',body:JSON.stringify({kind,path})});
+  for(const k in shown)delete shown[k];refresh()}catch(e){$('message').textContent=e.message}
+}
+function renderMuted(list){
+ $('mutedCard').classList.toggle('hide',!list.length);const box=$('mutedList');box.replaceChildren();
+ for(const m of list){const f=el('div','finding');f.append(el('div',null,m.path),el('p','muted',m.label));
+  const b=el('button','secondary mini','Unmute');b.onclick=()=>muteFinding(m.kind,m.path,true);f.append(b);box.append(f)}
+}
+function renderPlayback(data){
+ const saving=data.summary.find(g=>g.kind==='reencode_candidate');
+ $('savings').textContent=saving&&saving.bytes?'≈ '+bytes(saving.bytes)+' could be saved':'';
+ $('playbackNote').textContent='Checked against '+data.languages.join(', ')+' audio and subtitles. Files that may not play smoothly on every device, and files that would shrink a lot if Shrinkarr re-encoded them.';
+ renderFindings($('playback'),data.summary,'No playback problems found yet. Details fill in as files are probed.',true);
+}
 function renderChecks(data){
  const apps=$('checkApps');apps.replaceChildren();
  $('crosscheck').disabled=!data.services.length&&!data.without_key.length;
@@ -109,14 +126,18 @@ function renderFindings(list,groups,empty,withSize){
  for(const c of items){
   const d=el('details');const sum=el('summary');sum.append(el('strong',null,c.label),el('span',null,c.count.toLocaleString()+(withSize&&c.bytes?' • '+bytes(c.bytes):'')));d.append(sum);
   d.ontoggle=async()=>{if(!d.open||d.dataset.loaded)return;d.dataset.loaded='1';try{const rows=await api('/api/findings?kind='+c.kind);
-   for(const r of rows){const f=el('div','finding');f.append(el('div',null,r.path+(r.size?' — '+bytes(r.size):'')),el('p','muted',r.detail||''));d.append(f)}
+   for(const r of rows){const f=el('div','finding');f.append(el('div',null,r.path+(r.size?' — '+bytes(r.size):'')),el('p','muted',r.detail||''));
+    const b=el('button','secondary mini','Mute');b.onclick=()=>muteFinding(c.kind,r.path);f.append(b);
+    const parent=r.path.includes('/')?r.path.slice(0,r.path.lastIndexOf('/')):'';
+    if(parent&&!r.path.includes(': ')){const fb=el('button','secondary mini','Mute folder');fb.title=parent;fb.onclick=()=>muteFinding(c.kind,parent);f.append(fb)}
+    d.append(f)}
    if(rows.length<c.count)d.append(el('p','muted','Showing the largest '+rows.length+'.'))}catch(e){d.append(el('p','alert',e.message))}};
   list.append(d)}
 }
 async function refresh(){
  try{
- const [data,issues,libraries,stack,events,scans,space,checks]=await Promise.all([api('/api/status'),api('/api/issues'),api('/api/libraries'),api('/api/stack'),api('/api/events'),api('/api/scans?limit=10'),api('/api/space'),api('/api/consistency')]);
- renderStack(stack);renderEvents(events);renderScans(scans);renderSpace(space);renderChecks(checks);
+ const [data,issues,libraries,stack,events,scans,space,checks,playbackData,mutedList]=await Promise.all([api('/api/status'),api('/api/issues'),api('/api/libraries'),api('/api/stack'),api('/api/events'),api('/api/scans?limit=10'),api('/api/space'),api('/api/consistency'),api('/api/playback'),api('/api/muted')]);
+ renderStack(stack);renderEvents(events);renderScans(scans);renderSpace(space);renderChecks(checks);renderPlayback(playbackData);renderMuted(mutedList);
  $('files').textContent=data.total_files.toLocaleString();$('bytes').textContent=(data.bytes/1099511627776).toFixed(2)+' TiB';
  $('probed').textContent=(data.statuses.ok||0).toLocaleString();
  $('issueCount').textContent=issues.length.toLocaleString()+(issues.length===500?'+':'');

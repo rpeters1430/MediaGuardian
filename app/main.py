@@ -8,7 +8,15 @@ from fastapi import Depends, FastAPI, HTTPException, Request, Response
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
-from . import auth, cleanup, core, crosscheck, events, guardian, stack
+from . import auth, cleanup, core, crosscheck, events, guardian, playback, stack
+
+
+class MuteBody(BaseModel):
+    kind: str = Field(min_length=1, max_length=64)
+    path: str = Field(min_length=1, max_length=4096)
+
+
+ALL_KINDS = {**cleanup.KINDS, **crosscheck.KINDS, **playback.KINDS}
 
 
 class LoginBody(BaseModel):
@@ -28,7 +36,7 @@ async def lifespan(app):
 
 
 app = FastAPI(
-    title="MediaGuardian", version="0.5.0", lifespan=lifespan,
+    title="MediaGuardian", version="0.6.0", lifespan=lifespan,
     docs_url=None, redoc_url=None, openapi_url=None,
 )
 
@@ -134,9 +142,38 @@ def space(user: str = Depends(auth.check_session)):
 
 @app.get("/api/findings")
 def findings(kind: str | None = None, limit: int = 200, user: str = Depends(auth.check_session)):
-    if kind is not None and kind not in cleanup.KINDS and kind not in crosscheck.KINDS:
+    if kind is not None and kind not in ALL_KINDS:
         raise HTTPException(400, "Unknown finding kind")
     return cleanup.list_findings(kind, limit)
+
+
+@app.get("/api/playback")
+def playback_status(user: str = Depends(auth.check_session)):
+    return {
+        "languages": sorted(playback.LANGUAGES),
+        "summary": cleanup.group_summary(playback.KINDS),
+    }
+
+
+@app.get("/api/muted")
+def muted(user: str = Depends(auth.check_session)):
+    return [{**row, "label": ALL_KINDS.get(row["kind"], row["kind"])} for row in cleanup.list_muted()]
+
+
+@app.post("/api/findings/mute")
+def mute(body: MuteBody, request: Request, user: str = Depends(auth.check_session)):
+    auth.same_origin(request)
+    if body.kind not in ALL_KINDS:
+        raise HTTPException(400, "Unknown finding kind")
+    cleanup.mute(body.kind, body.path)
+    return {"muted": True}
+
+
+@app.post("/api/findings/unmute")
+def unmute(body: MuteBody, request: Request, user: str = Depends(auth.check_session)):
+    auth.same_origin(request)
+    cleanup.unmute(body.kind, body.path)
+    return {"muted": False}
 
 
 @app.get("/api/consistency")

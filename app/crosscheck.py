@@ -306,17 +306,7 @@ CHECK_KINDS = tuple(kind for kind in KINDS if kind != "unreadable")
 
 
 def summary():
-    with core.DB_LOCK, core.connect() as db:
-        rows = db.execute(
-            f"SELECT kind,COUNT(*) AS count,COALESCE(SUM(size),0) AS bytes FROM findings "
-            f"WHERE kind IN ({','.join('?' * len(KINDS))}) GROUP BY kind",
-            tuple(KINDS),
-        ).fetchall()
-    counts = {row["kind"]: dict(row) for row in rows}
-    return [
-        {"kind": kind, "label": label, **counts.get(kind, {"count": 0, "bytes": 0})}
-        for kind, label in KINDS.items()
-    ]
+    return cleanup.group_summary(KINDS)
 
 
 def snapshot():

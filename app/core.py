@@ -66,6 +66,9 @@ def init_db():
         if "source" not in {row["name"] for row in db.execute("PRAGMA table_info(findings)")}:
             db.execute("ALTER TABLE findings ADD COLUMN source TEXT")
         db.execute("CREATE TABLE IF NOT EXISTS kv (key TEXT PRIMARY KEY, value TEXT)")
+        db.execute("""CREATE TABLE IF NOT EXISTS muted (
+            kind TEXT NOT NULL, path TEXT NOT NULL, muted_at INTEGER NOT NULL, PRIMARY KEY (kind, path)
+        )""")
         db.execute("""CREATE TABLE IF NOT EXISTS scans (
             id INTEGER PRIMARY KEY AUTOINCREMENT, started_at INTEGER NOT NULL,
             finished_at INTEGER NOT NULL, trigger TEXT NOT NULL, complete INTEGER NOT NULL,
@@ -109,16 +112,15 @@ def excluded(relpath):
 
 
 def probe_file(path):
+    from . import playback
     try:
         result = subprocess.run(
-            ["ffprobe", "-v", "error", "-show_entries",
-             "format=duration,format_name:stream=codec_name,codec_type,width,height",
-             "-of", "json", str(path)],
+            ["ffprobe", "-v", "error", "-show_entries", playback.FFPROBE_ENTRIES, "-of", "json", str(path)],
             capture_output=True, text=True, timeout=PROBE_TIMEOUT, check=False,
         )
         if result.returncode:
             return "probe_error", None, result.stderr[:500]
-        return "ok", json.dumps(json.loads(result.stdout)), None
+        return "ok", json.dumps({**json.loads(result.stdout), "v": playback.PROBE_VERSION}), None
     except (OSError, subprocess.TimeoutExpired, ValueError) as exc:
         return "probe_error", None, str(exc)[:500]
 
@@ -192,7 +194,7 @@ def scan_once(reserved=False, trigger="manual"):
         "errors": 0, "error_sample": None, "fatal": None,
         "folder_findings": [], "shrunk": [], "new_findings": [],
     }
-    from . import cleanup
+    from . import cleanup, playback
     try:
         root = MEDIA.resolve(strict=True)
         if not root.is_dir():
@@ -234,6 +236,7 @@ def scan_once(reserved=False, trigger="manual"):
                                 suffix = Path(entry.name).suffix.lower()
                                 if suffix in cleanup.SIDECAR_SUFFIXES and not junk:
                                     tally.sidecars += 1
+                                    tally.sidecar_names.append(entry.name)
                                     continue
                                 if junk:
                                     st = entry.stat(follow_symlinks=False)
@@ -275,15 +278,22 @@ def scan_once(reserved=False, trigger="manual"):
                                 status = "empty" if st.st_size == 0 else "inventory"
                                 issue = "File is zero bytes" if st.st_size == 0 else None
                                 probe = None
-                                if unchanged and prior["status"] not in ("missing", "inventory"):
-                                    status, probe, issue = prior["status"], prior["probe_json"], prior["issue"]
-                                elif (
+                                can_probe = (
                                     st.st_size > 0
                                     and summary["probed"] < MAX_PROBES
                                     and st.st_mtime <= settled_before
+                                )
+                                if (
+                                    unchanged and prior["status"] not in ("missing", "inventory")
+                                    and not (can_probe and playback.needs_reprobe(prior["probe_json"]))
                                 ):
+                                    status, probe, issue = prior["status"], prior["probe_json"], prior["issue"]
+                                elif can_probe:
+                                    # New, changed, or probed by an older version that recorded fewer details.
                                     status, probe, issue = probe_file(entry.path)
                                     summary["probed"] += 1
+                                if probe:
+                                    tally.probed.append((relpath, entry.name, st.st_size, probe))
                                 if status in ("empty", "probe_error") and not (unchanged and prior["status"] == status):
                                     summary["new_issues"] += 1
                                     if len(summary["issue_sample"]) < 5:
@@ -316,6 +326,13 @@ def scan_once(reserved=False, trigger="manual"):
                         finding = tally.finding(str(folder.relative_to(root)))
                         if finding:
                             summary["folder_findings"].append(finding)
+                    for relpath_, name, size, probe_json in tally.probed:
+                        try:
+                            summary["folder_findings"] += playback.analyse(
+                                relpath_, size, json.loads(probe_json), tally.sidecar_names,
+                            )
+                        except (ValueError, TypeError, AttributeError):
+                            pass  # an odd probe result shouldn't stop the scan
                 except OSError as exc:
                     _note_error(summary, exc)
                     unreadable.append(str(folder.relative_to(root)))

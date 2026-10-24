@@ -30,9 +30,34 @@ Pull requests run tests and build checks. A tag `v0.1.0` triggers GHCR publishin
 ## Roadmap
 - **v0.3:** scheduled scans, scan history, mass-disappearance guard, alerts with ntfy/Discord notifications, media stack status
 - **v0.4:** hardlink and orphan reports, Shrinkarr leftover audit, disk capacity forecast
-- **v0.5 (this release):** Jellyfin/Emby/Plex and Sonarr/Radarr cross-checks (library vs disk), stuck imports, permission checks
-- **v0.6:** playability flags (audio/subtitle languages, codecs), suggestions for Shrinkarr, muting issues
+- **v0.5:** Jellyfin/Emby/Plex and Sonarr/Radarr cross-checks (library vs disk), stuck imports, permission checks
+- **v0.6 (this release):** playback flags (audio/subtitle languages, codecs), Shrinkarr re-encode estimates, muting findings
 - **Later:** approval-based repair suggestions with a full audit trail. Repairs run in Shrinkarr or the *arr apps; MediaGuardian stays read-only.
+
+
+## v0.6 upgrade: playback checks and muting
+
+Pull the new image and update `compose.yaml`. The database is upgraded in place.
+
+### Playback
+ffprobe now also records audio and subtitle languages, subtitle formats, bitrates and channels. Files probed by older versions are probed again a few at a time, using the same `MG_MAX_PROBES_PER_SCAN` budget as new files, so the **Playback** panel fills in over the first few scans. Like before, probing reads only the file headers.
+
+| Finding | Meaning |
+|---|---|
+| Foreign-language audio without subtitles | No audio track in `MG_LANGUAGES` and no subtitles in those languages, either inside the file or as `Movie.en.srt` beside it. An unlabeled `Movie.srt` counts as a match, and files with untagged audio are skipped |
+| Only image-based subtitles | Your-language subtitles exist only as PGS/VobSub images. Turning them on makes most clients burn them in with a full video transcode, while an SRT alongside avoids that |
+| Video codec most devices can't play directly | Not in `MG_DIRECT_PLAY_VIDEO`, for example MPEG-2, VC-1 or XviD |
+| No audio track most devices can play directly | No track in `MG_DIRECT_PLAY_AUDIO`, for example DTS-only or TrueHD-only audio |
+| Old container format | AVI, WMV or MPG |
+| Could shrink with Shrinkarr | Old codecs (about 60% smaller re-encoded), or H.264 above 8 Mbps at 1080p, 4 Mbps at 720p, 25 Mbps at 2160p or 2 Mbps below that (about 50%). The panel adds up the estimated savings |
+
+MediaGuardian doesn't queue anything in Shrinkarr itself; that would need Shrinkarr credentials that can change files. Shrinkarr finds these files on its own scans, so this list shows what you would gain and which libraries to point it at first.
+
+### Muting
+Every finding in Cleanup, Library checks and Playback has **Mute** and **Mute folder** buttons. Muted findings are hidden and don't raise alerts. Muting a folder covers everything inside it, which is useful for an anime folder you expect to be Japanese-only. Muted items are listed in a **Muted** card, where you can unmute them.
+
+### New API endpoints
+`GET /api/playback`, `GET /api/muted`, `POST /api/findings/mute` and `POST /api/findings/unmute` (body `{"kind": "...", "path": "..."}`).
 
 
 ## v0.5 upgrade: library checks
