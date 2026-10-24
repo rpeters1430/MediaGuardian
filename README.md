@@ -223,6 +223,8 @@ openssl rand -hex 24  # copy output for MG_PASSWORD
 openssl rand -hex 32  # copy DIFFERENT output for MG_SESSION_SECRET
 ```
 
+**Passwords containing `$`:** Docker Compose treats `$name` inside a value as a variable and silently removes it, so a password can arrive shorter than you typed. Write each `$` as `$$`, or use `openssl rand -hex` values, which never contain `$`. If startup fails, the log names the setting and the length it received.
+
 **Important:** protect `.env` (`chmod 600 .env`), never commit it, and don't share credentials. For the existing NAS installation, preserve the SQLite database in `/volume1/docker/mediaguardian`.
 
 For SSH deployments after the new release is published:

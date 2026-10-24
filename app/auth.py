@@ -14,9 +14,25 @@ TTL = 12 * 3600
 ATTEMPTS = defaultdict(list)
 
 
+def config_problems(username, password, secret):
+    """Readable reasons the login settings can't be used. Lengths only, never the values."""
+    problems = []
+    if not username:
+        problems.append("MG_USERNAME is empty")
+    if len(password) < 12:
+        problems.append(f"MG_PASSWORD is {len(password)} characters; it needs at least 12")
+    if len(secret) < 32:
+        problems.append(f"MG_SESSION_SECRET is {len(secret)} characters; it needs at least 32")
+    if len(password) < 12 or len(secret) < 32:
+        # Compose has already removed "$name" from the value by the time it gets here.
+        problems.append("if the value you set is long enough, it probably contains $; write each $ as $$")
+    return problems
+
+
 def validate_config():
-    if not USERNAME or len(PASSWORD) < 12 or len(SECRET) < 32:
-        raise RuntimeError("Set MG_USERNAME, MG_PASSWORD (12+ characters), and MG_SESSION_SECRET (32+ characters)")
+    problems = config_problems(USERNAME, PASSWORD, SECRET)
+    if problems:
+        raise RuntimeError("Login settings are not usable: " + "; ".join(problems))
 
 
 def throttle(ip):
