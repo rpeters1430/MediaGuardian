@@ -156,6 +156,8 @@ Copy `services.example.json` to `/volume1/docker/mediaguardian/services.json`, t
 ]
 ```
 
+You can also put the same list in `compose.yaml` as `MG_SERVICES` (there is a commented example). When it is set, `services.json` is ignored, and changes need a `docker compose up -d` to take effect.
+
 Supported types: `jellyfin`, `emby`, `plex`, `sonarr`, `radarr`, `lidarr`, `readarr`, `prowlarr`, `jellyseerr`, `overseerr`, `qbittorrent`, `shrinkarr`, and `generic` (checks the URL as given). Use the NAS's LAN IP rather than `localhost`, which means the MediaGuardian container itself.
 
 Each app is checked every `MG_SERVICE_INTERVAL` seconds. Any HTTP reply below 500 counts as up, so a login page still shows the app is running. An app is reported down after two failed checks in a row. For Sonarr, Radarr, Lidarr, Readarr and Prowlarr, adding an `api_key` (Settings → General) also shows the app's own health warnings, such as an unreachable download client or failing indexers. The key is only sent to that app and is never shown in the dashboard. `services.json` holds API keys, so run `chmod 600` on it.

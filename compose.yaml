@@ -3,39 +3,66 @@ services:
     image: ghcr.io/rpeters1430/mediaguardian:latest
     container_name: mediaguardian
     restart: unless-stopped
+    # Use the same user:group as Jellyfin/Plex so "can't read" findings match what they can play.
     user: "1000:10"
     init: true
     ports:
       - "${MG_BIND_IP:-127.0.0.1}:8186:8080"
+    # Login, session secret and notification URLs live in .env (keep it chmod 600).
     env_file: .env
     environment:
       MG_DATA_DIR: /data
       MG_MEDIA_ROOT: /media
       TZ: ${TZ:-America/Los_Angeles}
-      MG_MAX_PROBES_PER_SCAN: "200"
-      MG_PROBE_TIMEOUT: "12"
-      MG_FILE_SLEEP: "0.02"
-      MG_MAX_FILES: "250000"
-      # Automatic scans. Every scan walks the whole share, so frequent scans keep
-      # HDDs from spinning down. MG_SCAN_WINDOW limits scheduled scans to quiet hours.
-      MG_SCAN_INTERVAL_MINUTES: "360"
+
+      # --- Scanning ---------------------------------------------------------
+      # Every scan walks the whole share, so frequent scans keep HDDs from
+      # spinning down. MG_SCAN_WINDOW limits scheduled scans to quiet hours, e.g. "1-7".
+      MG_SCAN_INTERVAL_MINUTES: "360"   # 0 turns automatic scans off
       MG_SCAN_WINDOW: ""
-      MG_SETTLE_SECONDS: "300"
-      MG_EXCLUDE: ""
-      MG_SERVICE_INTERVAL: "60"
-      # How often to compare Sonarr/Radarr/Jellyfin/Plex with the disk (API calls only).
-      MG_CROSSCHECK_MINUTES: "60"
-      # Playback checks: languages you want audio or subtitles in (ISO codes, e.g. "eng,spa"),
-      # and the codecs your players handle without the server transcoding.
-      MG_LANGUAGES: "eng"
-      MG_DIRECT_PLAY_VIDEO: "h264,hevc,av1,vp9"
-      MG_DIRECT_PLAY_AUDIO: "aac,ac3,eac3,mp3,opus,flac,vorbis"
+      MG_STARTUP_SCAN_DELAY: "120"      # seconds after start before the first scan
+      MG_MAX_PROBES_PER_SCAN: "200"     # new/changed files read with ffprobe per scan
+      MG_PROBE_TIMEOUT: "12"
+      MG_SETTLE_SECONDS: "300"          # skip probing files modified this recently
+      MG_FILE_SLEEP: "0.02"             # pause between files to keep disk load low
+      MG_MAX_FILES: "250000"
+      MG_EXCLUDE: ""                    # extra folder names to skip, e.g. "Downloads,Extras"
+
+      # --- Alerts -----------------------------------------------------------
+      # Hold off marking files missing when at least MIN files and PERCENT of the
+      # library vanish in one scan (usually an unmounted share).
+      MG_MISSING_GUARD_MIN: "25"
+      MG_MISSING_GUARD_PERCENT: "10"
+      MG_SHRINK_ALERT_PERCENT: "90"     # warn when a file shrinks by more than this
+      MG_DISK_WARN_PERCENT: "10"        # warn below this much free space
+      MG_DISK_WARN_DAYS: "30"           # or when the disk will be full sooner than this
+
+      # --- Downloads --------------------------------------------------------
       # Download folder(s) as seen inside the container, comma-separated. Enables the
       # "stored twice" and "not in library" reports. Mount them read-only below.
       MG_DOWNLOADS: ""
       MG_UNIMPORTED_DAYS: "7"
-      MG_DISK_WARN_DAYS: "30"
-      MG_DISK_WARN_PERCENT: "10"
+
+      # --- Your apps --------------------------------------------------------
+      MG_SERVICE_INTERVAL: "60"         # seconds between up/down checks
+      MG_CROSSCHECK_MINUTES: "60"       # library checks against the apps (API calls only)
+      # List your apps here instead of /volume1/docker/mediaguardian/services.json.
+      # When set, services.json is ignored. Write any "$" in a key as "$$".
+      # MG_SERVICES: |
+      #   [
+      #     {"name": "Jellyfin", "type": "jellyfin", "url": "http://192.168.1.10:8096", "api_key": "JELLYFIN_API_KEY"},
+      #     {"name": "Sonarr", "type": "sonarr", "url": "http://192.168.1.10:8989", "api_key": "SONARR_API_KEY"},
+      #     {"name": "Radarr", "type": "radarr", "url": "http://192.168.1.10:7878", "api_key": "RADARR_API_KEY"},
+      #     {"name": "qBittorrent", "type": "qbittorrent", "url": "http://192.168.1.10:8080"},
+      #     {"name": "Shrinkarr", "type": "shrinkarr", "url": "http://192.168.1.10:3000"}
+      #   ]
+
+      # --- Playback ---------------------------------------------------------
+      # Languages you want audio or subtitles in (ISO codes, e.g. "eng,spa"), and the
+      # codecs your players handle without the server transcoding.
+      MG_LANGUAGES: "eng"
+      MG_DIRECT_PLAY_VIDEO: "h264,hevc,av1,vp9"
+      MG_DIRECT_PLAY_AUDIO: "aac,ac3,eac3,mp3,opus,flac,vorbis"
     volumes:
       - /volume1/docker/mediaguardian:/data:rw
       - /volume1/Media:/media:ro

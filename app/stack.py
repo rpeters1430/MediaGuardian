@@ -37,19 +37,29 @@ def services_file():
     return Path(os.getenv("MG_SERVICES_FILE", str(core.BASE / "services.json")))
 
 
+def config_source():
+    """'MG_SERVICES' when the app list is set in the environment, else the services.json path."""
+    return "MG_SERVICES" if os.getenv("MG_SERVICES", "").strip() else str(services_file())
+
+
 def load_config():
-    path = services_file()
-    try:
-        mtime = path.stat().st_mtime_ns
-    except FileNotFoundError:
-        STATE.update(config=[], config_error=None, config_mtime=None)
-        return []
-    if mtime == STATE["config_mtime"]:
+    inline = os.getenv("MG_SERVICES", "").strip()
+    if inline:
+        version = ("env", inline)
+    else:
+        path = services_file()
+        try:
+            version = path.stat().st_mtime_ns
+        except FileNotFoundError:
+            STATE.update(config=[], config_error=None, config_mtime=None)
+            return []
+    if version == STATE["config_mtime"]:
         return STATE["config"]
+    mtime = version
     try:
-        raw = json.loads(path.read_text())
+        raw = json.loads(inline or path.read_text())
         if not isinstance(raw, list):
-            raise ValueError("services.json must contain a list of services")
+            raise ValueError(f"{config_source()} must contain a list of services")
         config = []
         for item in raw:
             name, url = str(item.get("name", "")).strip(), str(item.get("url", "")).strip().rstrip("/")
@@ -162,6 +172,6 @@ def snapshot():
     return {
         "services": services,
         "config_error": STATE["config_error"],
-        "config_file": str(services_file()),
+        "config_file": config_source(),
         "interval_seconds": SERVICE_INTERVAL,
     }
