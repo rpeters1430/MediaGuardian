@@ -54,7 +54,7 @@ function renderStack(stack){
  const box=$('stack');box.replaceChildren();
  $('stackInfo').textContent=stack.services.length?'Checked every '+stack.interval_seconds+'s':'';
  if(stack.config_error){const p=el('p','alert',stack.config_error);p.style.gridColumn='1/-1';box.append(p)}
- if(!stack.services.length&&!stack.config_error){const p=el('p',null,'No apps configured yet. Create ');p.style.gridColumn='1/-1';p.append(el('code',null,stack.config_file),' to watch Jellyfin, Plex, Sonarr, Radarr, Shrinkarr and the rest of your stack.');box.append(p);return}
+ if(!stack.services.length&&!stack.config_error){const p=el('p',null,'No apps configured yet. Set ');p.style.gridColumn='1/-1';p.append(el('code',null,'MG_SERVICES'),' in compose.yaml or create ',el('code',null,stack.config_file),' to watch Jellyfin, Plex, Sonarr, Radarr, Shrinkarr and the rest of your stack.');box.append(p);return}
  for(const svc of stack.services){
   const card=el('div','card svc');const title=el('div');title.append(el('span','dot '+svc.status),el('strong',null,svc.name));
   const label={up:'Up',unstable:'Not responding',down:'Down'}[svc.status];

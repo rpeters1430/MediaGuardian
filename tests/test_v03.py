@@ -197,3 +197,15 @@ def test_stack_rejects_bad_config(media):
     (core.BASE / "services.json").write_text('[{"name":"X","url":"ftp://x","type":"sonarr"}]')
     stack.load_config()
     assert "http(s) url" in stack.snapshot()["config_error"]
+
+
+def test_services_from_environment_override_the_file(media, monkeypatch):
+    (core.BASE / "services.json").write_text('[{"name":"FromFile","url":"http://a:1","type":"generic"}]')
+    monkeypatch.setenv("MG_SERVICES", '[{"name":"FromEnv","url":"http://b:2","type":"sonarr","api_key":"k"}]')
+    assert [s["name"] for s in stack.load_config()] == ["FromEnv"]
+    assert stack.snapshot()["config_file"] == "MG_SERVICES"
+    monkeypatch.setenv("MG_SERVICES", '{"not": "a list"}')
+    stack.load_config()
+    assert "MG_SERVICES must contain a list" in stack.snapshot()["config_error"]
+    monkeypatch.delenv("MG_SERVICES")
+    assert [s["name"] for s in stack.load_config()] == ["FromFile"]
