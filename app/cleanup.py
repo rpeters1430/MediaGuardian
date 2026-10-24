@@ -29,6 +29,7 @@ KINDS = {
     "copied_download": "Download stored twice (not hardlinked)",
     "download_not_in_library": "Download with no library copy",
     "shrinkarr_leftover": "Shrinkarr leftover file",
+    "shrinkarr_metadata": "Artwork or metadata made for a Shrinkarr temp file",
     "incomplete_download": "Incomplete download in the library",
     "sample_file": "Sample clip",
     "empty_folder": "Empty folder",
@@ -49,8 +50,13 @@ def ignored_file(name):
 
 
 def junk_kind(name):
-    if ".shrinkarr.bak" in name or ".shrinkarr.tmp" in name:
+    if ".shrinkarr.bak" in name:
         return "shrinkarr_leftover"
+    if ".shrinkarr.tmp" in name:
+        # A media server or *arr app saw the temp video mid-encode and saved a poster or .nfo for it.
+        if Path(name).suffix.lower() in core.EXTENSIONS:
+            return "shrinkarr_leftover"
+        return "shrinkarr_metadata"
     if Path(name).suffix.lower() in INCOMPLETE_SUFFIXES:
         return "incomplete_download"
     return None

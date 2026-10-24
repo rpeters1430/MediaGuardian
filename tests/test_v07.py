@@ -195,3 +195,19 @@ def test_test_service_shows_key_and_folder_mapping(client):
         assert invalid.status_code == 400
     finally:
         httpd.shutdown()
+
+
+def test_shrinkarr_temp_artwork_is_not_an_interrupted_replacement():
+    assert cleanup.junk_kind("Colony (2026) Bluray-1080p.shrinkarr.tmp-poster.jpg") == "shrinkarr_metadata"
+    assert cleanup.junk_kind("Film.shrinkarr.tmp.nfo") == "shrinkarr_metadata"
+    assert cleanup.junk_kind("Film.shrinkarr.tmp.mkv") == "shrinkarr_leftover"
+    assert cleanup.junk_kind("Film.mkv.shrinkarr.bak") == "shrinkarr_leftover"
+    assert cleanup.junk_kind("Film.mkv.shrinkarr.bak.txn") == "shrinkarr_leftover"
+
+
+def test_media_server_auth_headers():
+    from app import crosscheck
+    jellyfin = {"type": "jellyfin", "api_key": "k"}
+    assert crosscheck.server_headers(jellyfin) == {"Authorization": 'MediaBrowser Token="k"'}
+    assert crosscheck.server_headers({"type": "emby", "api_key": "k"}) == {"X-Emby-Token": "k"}
+    assert crosscheck.server_headers({"type": "plex", "api_key": "k"}) == {"X-Plex-Token": "k"}
