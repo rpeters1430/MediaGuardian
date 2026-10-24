@@ -22,6 +22,7 @@ EXTRAS_SUFFIXES = (
     "-interview", "-scene", "-short", "-other", "-clip", "-extra",
 )
 SERVER_TYPES = {"jellyfin", "emby", "plex"}
+EPISODE_LOOKUPS = 50  # most series checked file by file per run
 ARR_TYPES = {"sonarr", "radarr"}
 
 KINDS = {
@@ -152,7 +153,7 @@ def check_arr(service, index):
     for path in videos:
         for folder in ancestors(path):
             per_folder[folder] = per_folder.get(folder, 0) + 1
-    tracked = set()
+    tracked, suspects = set(), []
     for item in items:
         folder = to_local(item.get("path") or "", roots)
         if folder is None:
@@ -168,10 +169,24 @@ def check_arr(service, index):
             expected = (item.get("statistics") or {}).get("episodeFileCount") or 0
             present = per_folder.get(folder, 0)
             if expected > present:
-                findings.append((
-                    "arr_missing_file", folder, 0,
-                    f"{service['name']} lists {expected} episode files for {label}, but {present} are on disk",
-                ))
+                suspects.append((item, folder, label, expected, present))
+    # Counts can disagree for harmless reasons, so ask Sonarr for the exact files of each
+    # series that doesn't add up and report only the files that really are gone.
+    for item, folder, label, expected, present in suspects[:EPISODE_LOOKUPS]:
+        try:
+            files = fetch_json(f"{base}/api/v3/episodefile?seriesId={item['id']}", headers)
+        except Exception:  # fall back to the count when the lookup fails
+            files = None
+        if files is None:
+            findings.append((
+                "arr_missing_file", folder, 0,
+                f"{service['name']} lists {expected} episode files for {label}, but {present} are on disk",
+            ))
+            continue
+        for episode_file in files:
+            local = to_local(episode_file.get("path") or "", roots)
+            if local and local not in index:
+                findings.append(("arr_missing_file", local, 0, f"{service['name']} expects this file for {label}"))
     untracked = {}
     for root in roots.values():
         for path in videos:
@@ -186,6 +201,16 @@ def check_arr(service, index):
             f"{count} video files in a {service['name']} root folder that {service['name']} doesn't manage",
         ))
     return findings, unmapped
+
+
+def server_headers(service):
+    token = service["api_key"]
+    if service["type"] == "plex":
+        return {"X-Plex-Token": token}
+    if service["type"] == "jellyfin":
+        # Jellyfin 10.11 turns off the X-Emby-Token header by default.
+        return {"Authorization": f'MediaBrowser Token="{token}"'}
+    return {"X-Emby-Token": token}
 
 
 def server_paths(service, headers):
@@ -219,9 +244,7 @@ def server_paths(service, headers):
 
 
 def check_server(service, index, now):
-    token = service["api_key"]
-    headers = {"X-Plex-Token": token} if service["type"] == "plex" else {"X-Emby-Token": token}
-    remotes, files = server_paths(service, headers)
+    remotes, files = server_paths(service, server_headers(service))
     roots, unmapped = map_roots(remotes, service["path_map"])
     known, findings = set(), []
     for remote_file in files:
@@ -327,10 +350,10 @@ def library_roots(service):
     if service["type"] in ARR_TYPES:
         return [r["path"] for r in fetch_json(f"{base}/api/v3/rootfolder", {"X-Api-Key": token})]
     if service["type"] == "plex":
-        sections = fetch_json(f"{base}/library/sections", {"X-Plex-Token": token})["MediaContainer"].get("Directory", [])
+        sections = fetch_json(f"{base}/library/sections", server_headers(service))["MediaContainer"].get("Directory", [])
         return [loc["path"] for s in sections if s.get("type") in ("movie", "show") for loc in s.get("Location", [])]
     prefix = "/emby" if service["type"] == "emby" else ""
-    folders = fetch_json(f"{base}{prefix}/Library/VirtualFolders", {"X-Emby-Token": token})
+    folders = fetch_json(f"{base}{prefix}/Library/VirtualFolders", server_headers(service))
     return [
         loc for folder in folders
         if (folder.get("CollectionType") or "mixed") in ("movies", "tvshows", "mixed", "homevideos")

@@ -60,3 +60,13 @@ def test_skips_symlink_directories(monkeypatch):
         core.init_db()
         assert core.scan_once()
         assert core.stats()["total_files"] == 0
+
+
+def test_login_config_problems_name_the_setting():
+    from app import auth
+    assert auth.config_problems("admin", "x" * 12, "y" * 32) == []
+    problems = auth.config_problems("admin", "short", "y" * 40)
+    assert problems[0] == "MG_PASSWORD is 5 characters; it needs at least 12"
+    assert "$$" in problems[-1]
+    assert "MG_SESSION_SECRET is 0 characters" in "; ".join(auth.config_problems("admin", "x" * 12, ""))
+    assert auth.config_problems("", "x" * 12, "y" * 32) == ["MG_USERNAME is empty"]

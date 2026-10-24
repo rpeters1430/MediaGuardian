@@ -35,9 +35,16 @@ ROUTES = {
     # Sonarr
     "/sonarr/api/v3/rootfolder": [{"path": "/tv"}],
     "/sonarr/api/v3/series": [
-        {"title": "Show", "year": 2019, "path": "/tv/Show", "statistics": {"episodeFileCount": 3}},
-        {"title": "Complete", "path": "/tv/Complete", "statistics": {"episodeFileCount": 1}},
+        {"id": 1, "title": "Show", "year": 2019, "path": "/tv/Show", "statistics": {"episodeFileCount": 3}},
+        {"id": 2, "title": "Complete", "path": "/tv/Complete", "statistics": {"episodeFileCount": 2}},
+        # Counts more files than are on disk, but every file it lists is there (e.g. a multi-part file).
+        {"id": 3, "title": "Counted", "path": "/tv/Stray", "statistics": {"episodeFileCount": 5}},
     ],
+    "/sonarr/api/v3/episodefile?seriesId=1": [
+        {"path": "/tv/Show/Season 1/S01E01.mkv"}, {"path": "/tv/Show/Season 1/S01E02.mkv"},
+        {"path": "/tv/Show/Season 1/S01E03.mkv"},
+    ],
+    "/sonarr/api/v3/episodefile?seriesId=3": [{"path": "/tv/Stray/S01E01.mkv"}],
     "/sonarr/api/v3/queue": {"records": []},
     # Jellyfin
     "/jellyfin/Library/VirtualFolders": [
@@ -59,7 +66,7 @@ ROUTES = {
     ]}},
 }
 KEYS = {"/radarr": ("X-Api-Key", "rk"), "/sonarr": ("X-Api-Key", "sk"),
-        "/jellyfin": ("X-Emby-Token", "jk"), "/plex": ("X-Plex-Token", "pk")}
+        "/jellyfin": ("Authorization", 'MediaBrowser Token="jk"'), "/plex": ("X-Plex-Token", "pk")}
 
 
 class Handler(http.server.BaseHTTPRequestHandler):
@@ -67,7 +74,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
         pass
 
     def do_GET(self):
-        path = self.path.split("?")[0]
+        path = self.path if self.path in ROUTES else self.path.split("?")[0]
         prefix = "/" + path.split("/")[1]
         header, key = KEYS[prefix]
         if self.headers.get(header) != key:
@@ -153,11 +160,13 @@ def test_path_mapping(env):
 
 def test_full_crosscheck(env):
     guardian.run_scan()
-    assert found("arr_missing_file") == ["Movies/Film B (2021)/Film B.mkv", "TV/Show"]
+    # Show: the exact missing episode. Complete: the episodefile lookup fails, so the count is used.
+    # Counted: its count is off but every listed file exists, so nothing is reported.
+    assert found("arr_missing_file") == ["Movies/Film B (2021)/Film B.mkv", "TV/Complete", "TV/Show/Season 1/S01E03.mkv"]
     assert found("arr_stuck_import") == ["Radarr: Film.C.2023.1080p"]
     assert "No files found are eligible" in cleanup.list_findings("arr_stuck_import")[0]["detail"]
     # Radarr manages Film A and Film B; Untracked and Brand New aren't Radarr movies. Sonarr: Stray.
-    assert found("arr_not_tracked") == ["Movies/Brand New (2024)", "Movies/Untracked (1999)", "TV/Stray"]
+    assert found("arr_not_tracked") == ["Movies/Brand New (2024)", "Movies/Untracked (1999)"]
     assert found("server_missing_file") == ["Movies/Gone (2001)/Gone.mkv"]
     # Jellyfin covers Movies, Plex covers TV. New files, extras and trailers are skipped.
     assert found("server_not_in_library") == [
@@ -192,7 +201,7 @@ def test_removed_app_drops_its_findings(env):
     os.utime(core.BASE / "services.json", (OLD + 20, OLD + 20))
     guardian.run_crosscheck()
     assert found("arr_stuck_import") == []
-    assert found("arr_missing_file") == ["TV/Show"]
+    assert found("arr_missing_file") == ["TV/Complete", "TV/Show/Season 1/S01E03.mkv"]
 
 
 def test_unmapped_roots_are_reported(env):
