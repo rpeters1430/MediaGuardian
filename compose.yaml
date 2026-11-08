@@ -1,6 +1,6 @@
 services:
   mediaguardian:
-    image: ghcr.io/rpeters1430/mediaguardian:latest
+    image: ghcr.io/rpeters1430/mediaguardian:latest@sha256:c3aed80bb1523c8d77838d7678c94b09ed72b2bcb937c459e8bb83f2d13ad3d1
     container_name: mediaguardian
     restart: unless-stopped
     # Use the same user:group as Jellyfin/Plex so "can't read" findings match what they can play.
